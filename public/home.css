@@ -14,6 +14,8 @@
   --danger: #ff6b7a;
   --spot-x: 50%;
   --spot-y: 22%;
+  --blackhole-core-x: 56vw;
+  --blackhole-core-y: 48vh;
   --shadow: 0 34px 100px rgba(0, 0, 0, 0.48);
 }
 
@@ -45,13 +47,191 @@ body::before {
   content: "";
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: 1;
   pointer-events: none;
   background:
     linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(circle at 52% 24%, #000 0%, transparent 72%);
+}
+
+.blackhole-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: #020304;
+  isolation: isolate;
+  contain: paint style;
+}
+
+.blackhole-scene::before,
+.blackhole-scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.blackhole-scene::before {
+  background:
+    radial-gradient(circle at var(--blackhole-core-x) var(--blackhole-core-y), transparent 0 12rem, rgba(0, 0, 0, 0.16) 22rem, rgba(0, 0, 0, 0.62) 58rem),
+    linear-gradient(90deg, rgba(2, 3, 4, 0.72), transparent 28%, transparent 72%, rgba(2, 3, 4, 0.62));
+}
+
+.blackhole-scene::after {
+  background:
+    radial-gradient(ellipse at 50% 52%, transparent 0 38%, rgba(0, 0, 0, 0.58) 82%),
+    linear-gradient(180deg, rgba(2, 3, 4, 0.48), transparent 28%, rgba(2, 3, 4, 0.72));
+}
+
+.blackhole-image {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 56% 48%;
+  opacity: 0.82;
+  filter: brightness(0.78) saturate(1.1) contrast(1.08);
+  transform: scale(1.03);
+  transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1), filter 900ms ease, opacity 900ms ease;
+}
+
+.blackhole-lens,
+.blackhole-glow {
+  position: absolute;
+  left: var(--blackhole-core-x);
+  top: var(--blackhole-core-y);
+  z-index: 1;
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: screen;
+}
+
+.blackhole-lens {
+  width: min(68vw, 940px);
+  height: min(30vw, 360px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.24), transparent 12%),
+    radial-gradient(ellipse at 50% 50%, transparent 24%, rgba(232, 193, 106, 0.28) 32%, transparent 52%),
+    linear-gradient(90deg, transparent 0 18%, rgba(232, 193, 106, 0.3) 42%, rgba(98, 168, 255, 0.2) 58%, transparent 82%);
+  opacity: 0.36;
+  filter: blur(18px);
+  animation: blackholeLensDrift 8s ease-in-out infinite alternate paused;
+}
+
+.blackhole-glow {
+  width: min(42vw, 560px);
+  height: min(42vw, 560px);
+  background:
+    radial-gradient(circle, transparent 0 18%, rgba(232, 193, 106, 0.22) 19%, rgba(98, 168, 255, 0.13) 31%, transparent 56%);
+  opacity: 0.6;
+  filter: blur(10px);
+  animation: blackholeCorePulse 5.6s ease-in-out infinite alternate paused;
+}
+
+body.is-home-effects-ready .blackhole-lens,
+body.is-home-effects-ready .blackhole-glow {
+  animation-play-state: running;
+}
+
+.blackhole-controls {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.blackhole-hotspot {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: transparent;
+  background: transparent;
+  opacity: 0;
+  outline: none;
+  pointer-events: none;
+}
+
+.blackhole-hotspot:focus-visible {
+  opacity: 1;
+  background: radial-gradient(circle, rgba(55, 224, 181, 0.2), rgba(232, 193, 106, 0.12) 48%, transparent 70%);
+  box-shadow:
+    0 0 0 3px rgba(55, 224, 181, 0.72),
+    0 0 34px rgba(232, 193, 106, 0.34);
+}
+
+.blackhole-background-trigger {
+  top: 51vh;
+  right: 6px;
+  width: clamp(12px, calc((100vw - min(1280px, calc(100vw - 40px))) / 2 - 10px), 66px);
+  height: clamp(96px, 15vh, 146px);
+  transform: translateY(-50%) rotate(5deg);
+}
+
+.blackhole-ship-trigger {
+  --ship-x: 0px;
+  --ship-y: 0px;
+  --ship-rot: 0deg;
+  position: fixed;
+  left: clamp(16px, 3vw, 42px);
+  top: clamp(16px, 3vw, 38px);
+  z-index: 5;
+  width: clamp(142px, 17vw, 246px);
+  aspect-ratio: 1.28;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(-16px, -8px, 0) scale(0.86);
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 14px 32px rgba(98, 168, 255, 0.3)) drop-shadow(0 0 18px rgba(232, 193, 106, 0.2));
+  transition: opacity 420ms ease, transform 520ms cubic-bezier(0.16, 1, 0.3, 1), filter 420ms ease;
+}
+
+.blackhole-ship-trigger img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 999px;
+  mix-blend-mode: screen;
+}
+
+.blackhole-ship-trigger:focus-visible {
+  outline: 3px solid rgba(55, 224, 181, 0.78);
+  outline-offset: 5px;
+  filter: drop-shadow(0 18px 38px rgba(98, 168, 255, 0.42)) drop-shadow(0 0 24px rgba(232, 193, 106, 0.32));
+}
+
+body.is-blackhole-hidden .blackhole-ship-trigger {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0) scale(1);
+  animation: shipDrift 4.8s ease-in-out infinite alternate;
+}
+
+body.is-blackhole-restoring .blackhole-ship-trigger {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(var(--ship-x), var(--ship-y), 0) rotate(var(--ship-rot)) scaleX(5.8) scaleY(0.08);
+  filter: blur(6px) brightness(1.36) saturate(1.42);
+  transition-duration: 1120ms, 1120ms, 1120ms;
+  transition-timing-function: ease, cubic-bezier(0.62, 0, 0.18, 1), ease;
+}
+
+body.is-blackhole-hidden .blackhole-ship-trigger:hover {
+  filter: drop-shadow(0 18px 42px rgba(98, 168, 255, 0.42)) drop-shadow(0 0 28px rgba(232, 193, 106, 0.32));
 }
 
 a,
@@ -78,22 +258,28 @@ input {
   position: fixed;
   left: var(--spot-x);
   top: var(--spot-y);
-  z-index: 0;
+  z-index: 2;
   width: 34rem;
   height: 34rem;
   pointer-events: none;
   border-radius: 999px;
+  opacity: 0;
   background:
     radial-gradient(circle, rgba(55, 224, 181, 0.16), rgba(98, 168, 255, 0.06) 38%, transparent 68%);
   filter: blur(10px);
   transform: translate(-50%, -50%);
   transition: opacity 200ms ease;
+  contain: paint style;
+}
+
+body.is-pointer-lighting-ready .cursor-spotlight {
+  opacity: 1;
 }
 
 .scene-noise {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: 2;
   pointer-events: none;
   opacity: 0.1;
   background-image:
@@ -101,12 +287,13 @@ input {
     radial-gradient(circle at 78% 68%, rgba(255, 255, 255, 0.18) 0 1px, transparent 1px);
   background-size: 17px 19px, 23px 29px;
   mix-blend-mode: screen;
+  contain: paint style;
 }
 
 .site-header,
 main {
   position: relative;
-  z-index: 1;
+  z-index: 3;
 }
 
 .site-header {
@@ -217,6 +404,7 @@ main {
 }
 
 .magnetic-card {
+  transform: var(--magnetic-transform, translateZ(0));
   transform-style: preserve-3d;
   will-change: auto;
   transition: transform 260ms ease, border-color 260ms ease, box-shadow 260ms ease;
@@ -243,6 +431,77 @@ main {
 
 .magnetic-card:hover::before {
   opacity: 1;
+}
+
+.blackhole-pull-target {
+  --bh-x: 0px;
+  --bh-y: 0px;
+  --bh-rot: 0deg;
+  --bh-delay: 0ms;
+  --bh-restore-delay: 0ms;
+  --bh-scale-x: 1;
+  --bh-scale-y: 1;
+  --bh-blur: 0px;
+  transform-origin: 50% 50%;
+  transition:
+    transform 540ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 360ms ease,
+    filter 360ms ease,
+    border-color 260ms ease,
+    box-shadow 260ms ease;
+}
+
+body.is-blackhole-collapsing .blackhole-pull-target,
+body.is-blackhole-hidden .blackhole-pull-target {
+  pointer-events: none;
+  opacity: 0;
+  filter: blur(var(--bh-blur)) brightness(0.42) saturate(1.5) contrast(1.18);
+  transform: translate3d(var(--bh-x), var(--bh-y), 0) rotate(var(--bh-rot)) scaleX(var(--bh-scale-x)) scaleY(var(--bh-scale-y));
+}
+
+body.is-blackhole-collapsing .blackhole-pull-target,
+body.is-blackhole-restoring .blackhole-pull-target {
+  will-change: transform, opacity, filter;
+}
+
+body.is-blackhole-collapsing .blackhole-pull-target {
+  transition-duration: 2000ms, 1600ms, 1600ms, 260ms, 260ms;
+  transition-delay: var(--bh-delay);
+  transition-timing-function: cubic-bezier(0.72, 0, 0.12, 1), ease, ease, ease, ease;
+}
+
+body.is-blackhole-hidden .blackhole-pull-target {
+  visibility: hidden;
+  transition: none;
+}
+
+body.is-blackhole-restoring .blackhole-pull-target {
+  pointer-events: none;
+  visibility: visible;
+  opacity: 1;
+  filter: none;
+  transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  transition: none;
+  animation: blackholeExpandOut 1500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+body.is-blackhole-collapsing .blackhole-image,
+body.is-blackhole-hidden .blackhole-image {
+  opacity: 1;
+  filter: brightness(1.04) saturate(1.22) contrast(1.14);
+  transform: scale(1.09);
+}
+
+body.is-blackhole-collapsing .blackhole-glow,
+body.is-blackhole-hidden .blackhole-glow {
+  opacity: 0.95;
+  filter: blur(6px);
+}
+
+body.is-blackhole-collapsing .template-strip .strip-track,
+body.is-blackhole-hidden .template-strip .strip-track,
+body.is-blackhole-restoring .template-strip .strip-track {
+  animation-play-state: paused;
 }
 
 .hero-copy {
@@ -663,6 +922,60 @@ input:focus {
   }
 }
 
+@keyframes blackholeLensDrift {
+  from {
+    opacity: 0.28;
+    transform: translate(-50%, -50%) rotate(-1.4deg) scaleX(0.98);
+  }
+  to {
+    opacity: 0.46;
+    transform: translate(-50%, -50%) rotate(1.2deg) scaleX(1.04);
+  }
+}
+
+@keyframes blackholeCorePulse {
+  from {
+    opacity: 0.46;
+    transform: translate(-50%, -50%) scale(0.98);
+  }
+  to {
+    opacity: 0.72;
+    transform: translate(-50%, -50%) scale(1.04);
+  }
+}
+
+@keyframes blackholeExpandOut {
+  0% {
+    opacity: 0;
+    filter: blur(12px) brightness(1.45) saturate(1.4);
+    transform: translate3d(var(--bh-x), var(--bh-y), 0) rotate(var(--bh-rot)) scale(0.08);
+  }
+  18% {
+    opacity: 0.88;
+    filter: blur(8px) brightness(1.28) saturate(1.24);
+    transform: translate3d(calc(var(--bh-x) * 0.82), calc(var(--bh-y) * 0.82), 0) rotate(var(--bh-rot)) scale(0.24);
+  }
+  70% {
+    opacity: 1;
+    filter: blur(1px) brightness(1.08) saturate(1.08);
+    transform: translate3d(calc(var(--bh-x) * 0.08), calc(var(--bh-y) * 0.08), 0) rotate(0deg) scale(1.035);
+  }
+  100% {
+    opacity: 1;
+    filter: none;
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes shipDrift {
+  from {
+    transform: translate3d(0, 0, 0) rotate(-1.2deg) scale(1);
+  }
+  to {
+    transform: translate3d(8px, 10px, 0) rotate(1.4deg) scale(1.035);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .site-header {
     animation: headerReveal 520ms cubic-bezier(0.16, 1, 0.3, 1) 90ms both;
@@ -708,6 +1021,8 @@ input:focus {
   grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.3fr);
   gap: 18px;
   margin-top: 18px;
+  content-visibility: auto;
+  contain-intrinsic-size: 560px;
 }
 
 .intro-copy {
@@ -768,9 +1083,33 @@ input:focus {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
   }
+
+  body.is-blackhole-collapsing .blackhole-pull-target,
+  body.is-blackhole-hidden .blackhole-pull-target {
+    filter: none !important;
+    transform: scale(0.985) !important;
+    transition-delay: 0ms !important;
+  }
+
+  body.is-blackhole-restoring .blackhole-pull-target {
+    animation: none !important;
+    transform: scale(1) !important;
+    transition-delay: 0ms !important;
+  }
+
+  body.is-blackhole-hidden .blackhole-ship-trigger,
+  body.is-blackhole-restoring .blackhole-ship-trigger {
+    animation: none !important;
+    filter: none !important;
+    transform: scale(1) !important;
+  }
 }
 
 @media (max-width: 1180px) {
+  .blackhole-background-trigger {
+    width: clamp(28px, calc((100vw - min(920px, calc(100vw - 28px))) / 2 - 12px), 76px);
+  }
+
   .site-header,
   main {
     width: min(100% - 28px, 920px);
@@ -818,6 +1157,65 @@ input:focus {
 }
 
 @media (max-width: 680px) {
+  :root {
+    --blackhole-core-x: 58vw;
+    --blackhole-core-y: 34vh;
+  }
+
+  .blackhole-image {
+    object-position: 57% 41%;
+    opacity: 0.66;
+    filter: brightness(0.72) saturate(1.06) contrast(1.05);
+    transform: scale(1.08);
+  }
+
+  .blackhole-lens {
+    width: 132vw;
+    height: 42vw;
+    opacity: 0.22;
+  }
+
+  .blackhole-glow {
+    width: 82vw;
+    height: 82vw;
+    opacity: 0.34;
+  }
+
+  .cursor-spotlight {
+    display: none;
+  }
+
+  .scene-noise {
+    opacity: 0.06;
+  }
+
+  .blackhole-background-trigger {
+    top: 86px;
+    right: 8px;
+    width: 48px;
+    height: 48px;
+    transform: none;
+  }
+
+  .blackhole-ship-trigger {
+    top: 14px;
+    left: 12px;
+    width: 118px;
+  }
+
+  body.is-blackhole-collapsing .blackhole-pull-target,
+  body.is-blackhole-hidden .blackhole-pull-target {
+    filter: blur(1px) brightness(0.78);
+    transform: scale(0.96);
+    transition-delay: 0ms;
+    transition-duration: 240ms, 190ms, 190ms, 260ms, 260ms;
+  }
+
+  body.is-blackhole-restoring .blackhole-pull-target {
+    transition-delay: 0ms;
+    transition-duration: 220ms, 180ms, 180ms, 260ms, 260ms;
+  }
+
   .site-header,
   main {
     width: min(100% - 20px, 430px);
@@ -866,6 +1264,14 @@ input:focus {
   .auth-panel,
   .intro-copy {
     border-radius: 24px;
+  }
+
+  .hero-copy,
+  .showcase-panel,
+  .auth-panel,
+  .intro-copy,
+  .feature-grid article {
+    backdrop-filter: blur(14px);
   }
 
   .hero-copy {

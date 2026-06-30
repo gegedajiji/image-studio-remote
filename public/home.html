@@ -6,15 +6,27 @@
     <meta name="description" content="有鱼生图，支持文生图、图生图、模板生图和作品交流区的 AI 图片创作平台。" />
     <title>有鱼生图</title>
     <link rel="icon" href="/assets/site-logo.png?v=2026062925" type="image/png" />
-    <link rel="stylesheet" href="/home.css?v=2026062924" />
+    <link rel="preload" as="image" href="/assets/home/gargantua-black-hole.jpg?v=2026070103" imagesrcset="/assets/home/gargantua-black-hole-mobile.jpg?v=2026070103 960w, /assets/home/gargantua-black-hole.jpg?v=2026070103 1672w" imagesizes="100vw" />
+    <link rel="stylesheet" href="/home.css?v=2026070103" />
   </head>
   <body>
+    <div class="blackhole-scene" aria-hidden="true">
+      <img class="blackhole-image" src="/assets/home/gargantua-black-hole.jpg?v=2026070103" srcset="/assets/home/gargantua-black-hole-mobile.jpg?v=2026070103 960w, /assets/home/gargantua-black-hole.jpg?v=2026070103 1672w" sizes="100vw" alt="" decoding="async" fetchpriority="high" width="1672" height="941" />
+      <div class="blackhole-lens"></div>
+      <div class="blackhole-glow"></div>
+    </div>
+    <div class="blackhole-controls" role="group" aria-label="黑洞彩蛋">
+      <button class="blackhole-hotspot blackhole-background-trigger" id="blackholeBackgroundTrigger" type="button" aria-label="点击首页空白背景触发黑洞吸入彩蛋"></button>
+      <button class="blackhole-ship-trigger" id="blackholeShipTrigger" type="button" aria-label="点击永恒号飞船返回主界面" tabindex="-1">
+        <img src="/assets/home/endurance-inspired-ship.jpg?v=2026070103" alt="" decoding="async" loading="lazy" width="560" height="448" />
+      </button>
+    </div>
     <div class="cursor-spotlight" aria-hidden="true"></div>
     <div class="scene-noise" aria-hidden="true"></div>
 
     <header class="site-header">
       <a class="brand" href="/" aria-label="有鱼生图首页">
-        <img src="/assets/site-logo.png?v=2026062925" alt="" />
+        <img src="/assets/site-logo.png?v=2026062925" alt="" width="256" height="256" />
         <span>有鱼生图</span>
       </a>
     </header>
@@ -40,28 +52,28 @@
           </div>
           <div class="showcase-grid">
             <article class="showcase-card" data-template-id="guofeng-campaign" data-home-template>
-              <img src="/assets/templates/guofeng-campaign.jpg" alt="" loading="eager" decoding="async" />
+              <img src="/assets/templates/guofeng-campaign.jpg" alt="" loading="eager" decoding="async" fetchpriority="low" width="768" height="768" />
               <div>
                 <span>国风宣发</span>
                 <strong>周芷若联动宣传图</strong>
               </div>
             </article>
             <article class="showcase-card" data-template-id="porcelain-museum" data-home-template>
-              <img src="/assets/templates/porcelain-museum.jpg" alt="" loading="lazy" decoding="async" />
+              <img src="/assets/templates/porcelain-museum.jpg" alt="" loading="lazy" decoding="async" fetchpriority="low" width="768" height="768" />
               <div>
                 <span>博物馆图鉴</span>
                 <strong>青花瓷博物馆图鉴</strong>
               </div>
             </article>
             <article class="showcase-card" data-template-id="poster-character" data-home-template>
-              <img src="/assets/templates/poster-character.jpg" alt="" loading="lazy" decoding="async" />
+              <img src="/assets/templates/poster-character.jpg" alt="" loading="lazy" decoding="async" fetchpriority="low" width="768" height="768" />
               <div>
                 <span>人物海报</span>
                 <strong>卡芙卡轮廓宇宙海报</strong>
               </div>
             </article>
             <article class="showcase-card" data-template-id="game-scene" data-home-template>
-              <img src="/assets/templates/game-scene.jpg" alt="" loading="lazy" decoding="async" />
+              <img src="/assets/templates/game-scene.jpg" alt="" loading="lazy" decoding="async" fetchpriority="low" width="768" height="768" />
               <div>
                 <span>游戏场景</span>
                 <strong>地平线8深圳实机图</strong>
@@ -139,6 +151,6 @@
       </section>
     </main>
 
-    <script src="/home.js?v=2026062924" defer></script>
+    <script src="/home.js?v=2026070103" defer></script>
   </body>
 </html>

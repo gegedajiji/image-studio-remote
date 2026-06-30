@@ -110,6 +110,21 @@ async function loadFeaturedWorksStrip() {
   }
 }
 
+function runWhenIdle(callback, timeout = 1200) {
+  if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(callback, { timeout });
+    return;
+  }
+  window.setTimeout(callback, Math.min(timeout, 700));
+}
+
+function preloadImage(src) {
+  if (!src) return;
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = src;
+}
+
 function setStatus(message, isError = false) {
   const node = $('homeAuthStatus');
   if (!node) return;
@@ -205,21 +220,245 @@ async function submitAuth(event) {
   }
 }
 
+function initBlackHoleEasterEgg() {
+  const backgroundTrigger = $('blackholeBackgroundTrigger');
+  const shipTrigger = $('blackholeShipTrigger');
+  if (!backgroundTrigger || !shipTrigger) return;
+
+  const reduceMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const mobileQuery = window.matchMedia?.('(max-width: 680px)');
+  const selectors = [
+    '.site-header',
+    '.hero-copy',
+    '.showcase-panel',
+    '.auth-panel',
+    '.template-strip',
+    '.intro-copy',
+    '.feature-grid article'
+  ];
+  const targets = Array.from(new Set(selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)))));
+  if (!targets.length) return;
+
+  targets.forEach((target) => target.classList.add('blackhole-pull-target'));
+
+  let blackholeState = 'idle';
+  let stateTimer = 0;
+  let resizeFrame = 0;
+
+  const isSimpleMotion = () => Boolean(reduceMotionQuery?.matches || mobileQuery?.matches);
+
+  const setContentInert = (isHidden) => {
+    targets.forEach((target) => {
+      target.inert = isHidden;
+      if (isHidden) {
+        target.setAttribute('aria-hidden', 'true');
+      } else {
+        target.removeAttribute('aria-hidden');
+      }
+    });
+  };
+
+  const setTriggerAccess = ({ canCollapse, canRestore }) => {
+    backgroundTrigger.tabIndex = canCollapse ? 0 : -1;
+    shipTrigger.tabIndex = canRestore ? 0 : -1;
+    backgroundTrigger.setAttribute('aria-disabled', canCollapse ? 'false' : 'true');
+    shipTrigger.setAttribute('aria-disabled', canRestore ? 'false' : 'true');
+  };
+
+  const resolveViewportLength = (value, axisSize) => {
+    const text = String(value || '').trim();
+    const amount = Number.parseFloat(text);
+    if (!Number.isFinite(amount)) return axisSize / 2;
+    if (text.endsWith('vw')) return window.innerWidth * amount / 100;
+    if (text.endsWith('vh')) return window.innerHeight * amount / 100;
+    if (text.endsWith('%')) return axisSize * amount / 100;
+    if (text.endsWith('px')) return amount;
+    return amount;
+  };
+
+  const getCorePoint = () => {
+    const styles = window.getComputedStyle(document.documentElement);
+    return {
+      x: resolveViewportLength(styles.getPropertyValue('--blackhole-core-x'), window.innerWidth),
+      y: resolveViewportLength(styles.getPropertyValue('--blackhole-core-y'), window.innerHeight)
+    };
+  };
+
+  const setTargetMotion = () => {
+    const core = getCorePoint();
+    const simpleMotion = isSimpleMotion();
+    targets.forEach((target, index) => {
+      const rect = target.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+
+      if (simpleMotion) {
+        target.style.setProperty('--bh-x', '0px');
+        target.style.setProperty('--bh-y', '0px');
+        target.style.setProperty('--bh-rot', '0deg');
+        target.style.setProperty('--bh-delay', '0ms');
+        target.style.setProperty('--bh-restore-delay', '0ms');
+        target.style.setProperty('--bh-scale-x', '0.96');
+        target.style.setProperty('--bh-scale-y', '0.96');
+        target.style.setProperty('--bh-blur', '1px');
+        return;
+      }
+
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const dx = core.x - centerX;
+      const dy = core.y - centerY;
+      const distance = Math.hypot(dx, dy);
+      const travelBoost = Math.min(1.34, 1.04 + distance / 1300);
+      const delay = Math.round(Math.min(420, index * 34 + distance * 0.045));
+      const stretch = Math.round((8.8 + Math.min(10.8, distance / 92)) * 100) / 100;
+      const squeeze = Math.round((0.045 + Math.min(0.025, rect.height / 12000)) * 1000) / 1000;
+      const angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
+      const blur = Math.round(Math.min(14, 2.4 + distance / 120));
+
+      target.style.setProperty('--bh-x', `${Math.round(dx * travelBoost)}px`);
+      target.style.setProperty('--bh-y', `${Math.round(dy * travelBoost)}px`);
+      target.style.setProperty('--bh-rot', `${angle}deg`);
+      target.style.setProperty('--bh-delay', `${delay}ms`);
+      target.style.setProperty('--bh-restore-delay', `${Math.max(0, Math.round(190 - delay * 0.42))}ms`);
+      target.style.setProperty('--bh-scale-x', String(stretch));
+      target.style.setProperty('--bh-scale-y', String(squeeze));
+      target.style.setProperty('--bh-blur', `${blur}px`);
+    });
+  };
+
+  const setShipMotion = () => {
+    const core = getCorePoint();
+    const rect = shipTrigger.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const dx = core.x - centerX;
+    const dy = core.y - centerY;
+    shipTrigger.style.setProperty('--ship-x', `${Math.round(dx * 1.05)}px`);
+    shipTrigger.style.setProperty('--ship-y', `${Math.round(dy * 1.05)}px`);
+    shipTrigger.style.setProperty('--ship-rot', `${Math.round(Math.atan2(dy, dx) * 180 / Math.PI)}deg`);
+  };
+
+  const setBodyState = (nextState) => {
+    document.body.classList.remove('is-blackhole-collapsing', 'is-blackhole-hidden', 'is-blackhole-restoring');
+    if (nextState !== 'idle') document.body.classList.add(`is-blackhole-${nextState}`);
+    blackholeState = nextState;
+  };
+
+  const clearStateTimer = () => {
+    if (!stateTimer) return;
+    window.clearTimeout(stateTimer);
+    stateTimer = 0;
+  };
+
+  const finishCollapse = () => {
+    setBodyState('hidden');
+    setContentInert(true);
+    setTriggerAccess({ canCollapse: false, canRestore: true });
+    setShipMotion();
+    shipTrigger.focus({ preventScroll: true });
+  };
+
+  const collapseHome = (event) => {
+    event?.preventDefault();
+    if (blackholeState !== 'idle') return;
+    clearStateTimer();
+    setContentInert(false);
+    setTargetMotion();
+    setTriggerAccess({ canCollapse: false, canRestore: false });
+    setBodyState('collapsing');
+    stateTimer = window.setTimeout(finishCollapse, isSimpleMotion() ? 320 : 2480);
+  };
+
+  const finishRestore = () => {
+    setBodyState('idle');
+    setContentInert(false);
+    setTriggerAccess({ canCollapse: true, canRestore: false });
+  };
+
+  const restoreHome = (event) => {
+    event?.preventDefault();
+    if (blackholeState === 'idle' || blackholeState === 'restoring') return;
+    clearStateTimer();
+    setTargetMotion();
+    setShipMotion();
+    setContentInert(true);
+    setTriggerAccess({ canCollapse: false, canRestore: false });
+    setBodyState('restoring');
+    stateTimer = window.setTimeout(finishRestore, reduceMotionQuery?.matches ? 360 : 1500);
+  };
+
+  const isInteractiveTarget = (target) => Boolean(target?.closest?.([
+    'a',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'label',
+    'summary',
+    'form',
+    '[role="button"]',
+    '[contenteditable="true"]',
+    '[data-home-template]'
+  ].join(',')));
+
+  const isContentTarget = (target) => Boolean(target?.closest?.('.blackhole-pull-target'));
+
+  const handleDocumentClick = (event) => {
+    if (blackholeState !== 'idle' || event.defaultPrevented || isInteractiveTarget(event.target)) return;
+    if (isContentTarget(event.target)) return;
+    collapseHome(event);
+  };
+
+  const scheduleMeasure = () => {
+    if (blackholeState === 'idle' || resizeFrame) return;
+    resizeFrame = window.requestAnimationFrame(() => {
+      resizeFrame = 0;
+      setTargetMotion();
+      setShipMotion();
+    });
+  };
+
+  setTriggerAccess({ canCollapse: true, canRestore: false });
+  backgroundTrigger.addEventListener('click', collapseHome);
+  shipTrigger.addEventListener('click', restoreHome);
+  document.addEventListener('click', handleDocumentClick);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') restoreHome(event);
+  });
+  window.addEventListener('resize', scheduleMeasure, { passive: true });
+  reduceMotionQuery?.addEventListener?.('change', () => {
+    setTargetMotion();
+    setShipMotion();
+  });
+  mobileQuery?.addEventListener?.('change', () => {
+    setTargetMotion();
+    setShipMotion();
+  });
+}
+
 function bindHome() {
   $('loginModeBtn')?.addEventListener('click', () => setMode('login'));
   $('registerModeBtn')?.addEventListener('click', () => setMode('register'));
   $('homeAuthForm')?.addEventListener('submit', submitAuth);
   $('heroRegisterBtn')?.addEventListener('click', () => focusAuth('register'));
+  initBlackHoleEasterEgg();
   bindPointerLighting();
   setMode('login');
   loadMe();
   loadTemplatePreviewImages();
-  loadFeaturedWorksStrip();
+  runWhenIdle(() => {
+    document.body.classList.add('is-home-effects-ready');
+    preloadImage('/assets/home/endurance-inspired-ship.jpg?v=2026070103');
+    loadFeaturedWorksStrip();
+  });
 }
 
 function bindPointerLighting() {
   const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  if (reduceMotion) return;
+  const finePointer = window.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches;
+  if (reduceMotion || !finePointer) return;
+  document.body.classList.add('is-pointer-lighting-ready');
   let frameId = 0;
   let latestEvent = null;
   let latestCard = null;
@@ -243,16 +482,17 @@ function bindPointerLighting() {
     const rotateY = Math.round((xRatio - 0.5) * 44) / 10;
     card.style.setProperty('--card-x', x);
     card.style.setProperty('--card-y', y);
-    card.style.transform = `perspective(1100px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-2px)`;
+    card.style.setProperty('--magnetic-transform', `perspective(1100px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-2px)`);
   };
 
   const resetCardSpot = (event) => {
-    event.currentTarget.style.transform = '';
+    event.currentTarget.style.removeProperty('--magnetic-transform');
   };
 
   const flushPointerLighting = () => {
     frameId = 0;
     if (!latestEvent) return;
+    if (document.body.className.includes('is-blackhole-')) return;
     updatePageSpot(latestEvent);
     if (latestCard) updateCardSpot(latestEvent, latestCard);
   };
