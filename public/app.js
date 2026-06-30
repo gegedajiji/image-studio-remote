@@ -116,13 +116,14 @@ import {
   showGenerationInPreview
 } from './modules/preview-controller.js';
 import {
+  clearCommunityCardCache,
   communityDiscoveryFilterById,
   communityDiscoveryFilters,
   communityPrimaryMetrics,
   communitySecondaryMetrics,
   communityTagList,
   initCommunityView,
-  renderCommunityCard,
+  renderCommunityCards,
   renderStudioTemplateCards,
   serverCommunityDiscoveryFilters
 } from './modules/community-view.js';
@@ -968,6 +969,7 @@ function stripCommunityCommentPrivateFields(comment) {
 
 function sanitizeCommunityStateForViewer() {
   state.communityPosts = state.communityPosts.map((post) => normalizeCommunityPostForDisplay(stripCommunityPrivateFields(post, { summary: true })));
+  clearCommunityCardCache();
   if (state.communityDetailPost) state.communityDetailPost = normalizeCommunityPostForDisplay(stripCommunityPrivateFields(state.communityDetailPost));
   if (state.communityTipPost) state.communityTipPost = normalizeCommunityPostForDisplay(stripCommunityPrivateFields(state.communityTipPost));
   if (state.communityReusePost) state.communityReusePost = normalizeCommunityPostForDisplay(stripCommunityPrivateFields(state.communityReusePost));
@@ -1034,6 +1036,7 @@ async function loadCommunityPosts({ silent = false } = {}) {
     ]);
 	    if (token !== state.communityLoadToken) return;
 	    state.communityPosts = (data.posts || []).map((post) => normalizeCommunityPostForDisplay(post));
+	    clearCommunityCardCache();
 	    state.communityTotal = Number(data.total ?? data.count ?? state.communityPosts.length);
 	    state.communityReturned = Number(data.returned ?? data.count ?? state.communityPosts.length);
 	    state.communityTags = Array.isArray(data.tags)
@@ -1053,6 +1056,7 @@ async function loadCommunityPosts({ silent = false } = {}) {
     if (token !== state.communityLoadToken) return;
 	    if (state.communityScope === 'mine') {
 	      state.communityPosts = [];
+	      clearCommunityCardCache();
 	      state.communityTotal = 0;
 	      state.communityReturned = 0;
 	      clearCreatorFeedbackState();
@@ -1183,13 +1187,13 @@ function renderCommunityPanel({ force = false } = {}) {
       </section>
       <p class="creator-support-summary">当前公开作品已收到自愿支持 ${yuan(totals.tipTotalCents || 0)}，自愿支持不影响互动热度和交流区排名。</p>
       ${renderCreatorDashboardFocus(posts)}
-      ${posts.map(renderCommunityCard).join('')}
+      ${renderCommunityCards(posts)}
       ${loadMoreControl}
     `;
     return;
   }
   grid.innerHTML = posts.length
-    ? `${posts.map(renderCommunityCard).join('')}${loadMoreControl}`
+    ? `${renderCommunityCards(posts)}${loadMoreControl}`
     : `<div class="feature-empty community-filter-empty"><p>${communityEmptyMessage({ query, activeTag })}</p>${hasCommunityFilters ? '<button type="button" data-community-clear-filters>清除筛选</button>' : ''}</div>`;
 }
 
@@ -2591,6 +2595,7 @@ async function deleteCommunityPostById(postId) {
   try {
     const data = await api(`/api/community/posts/${encodeURIComponent(postId)}`, { method: 'DELETE' });
     state.communityPosts = state.communityPosts.filter((item) => item.id !== postId);
+    clearCommunityCardCache();
     if (state.communityDetailPost?.id === postId) state.communityDetailPost = null;
     state.historyItems = state.historyItems.map((entry) => entry.communityPostId === postId ? { ...entry, communityPostId: null, communityPost: null } : entry);
     if (state.previewItem?.communityPostId === postId) {
@@ -3678,6 +3683,7 @@ function applyCommunityPostUpdate(post, options = {}) {
   const mergedSummaryPost = normalizeCommunityPostForDisplay(stripCommunityPrivateFields(mergedPost, { summary: true }));
   state.communityPosts = state.communityPosts.map((entry) => entry.id === mergedPost.id ? normalizeCommunityPostForDisplay(mergeCommunityPostForViewer(mergedSummaryPost, entry, { summary: true })) : entry);
   if (!state.communityPosts.some((entry) => entry.id === mergedPost.id)) state.communityPosts = [mergedSummaryPost, ...state.communityPosts];
+  clearCommunityCardCache();
   if (state.communityDetailPost?.id === mergedPost.id) state.communityDetailPost = mergeCommunityPostForViewer(mergedPost, state.communityDetailPost, { summary: false });
   state.historyItems = state.historyItems.map((entry) => (
     entry.communityPostId === mergedPost.id

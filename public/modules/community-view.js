@@ -16,6 +16,8 @@ export const communityDiscoveryFilters = [
 export const serverCommunityDiscoveryFilters = new Set(['uncommented', 'commented', 'reusable', 'downloaded', 'new', 'liked']);
 
 const templateClasses = ['prompt-rose', 'prompt-blue', 'prompt-purple', 'prompt-cyan'];
+const communityCardCacheLimit = 240;
+const communityCardCache = new Map();
 
 let studioTemplatesRenderKey = '';
 let helpers = {
@@ -31,6 +33,50 @@ let helpers = {
 
 export function initCommunityView(nextHelpers = {}) {
   helpers = { ...helpers, ...nextHelpers };
+}
+
+export function clearCommunityCardCache() {
+  communityCardCache.clear();
+}
+
+function rememberCommunityCard(cacheKey, rendered) {
+  communityCardCache.set(cacheKey, rendered);
+  if (communityCardCache.size > communityCardCacheLimit) {
+    communityCardCache.delete(communityCardCache.keys().next().value);
+  }
+  return rendered;
+}
+
+function communityCardCacheKey(post, viewState) {
+  return [
+    post.id || '',
+    post.updatedAt || '',
+    post.createdAt || '',
+    post.title || '',
+    post.description || '',
+    post.username || '',
+    post.imageUrl || '',
+    Array.isArray(post.images) ? post.images.map((image) => image?.imageUrl || image?.url || '').join(',') : '',
+    Array.isArray(post.tags) ? post.tags.join(',') : '',
+    post.canReuse === false ? 0 : 1,
+    post.liked ? 1 : 0,
+    post.likeCount || 0,
+    post.commentCount || 0,
+    post.downloadCount || 0,
+    post.reuseCount || 0,
+    post.hotScore || 0,
+    state.user?.id || 'guest',
+    state.communityScope,
+    state.communityView,
+    viewState.downloadPending ? 1 : 0,
+    viewState.likePending ? 1 : 0,
+    viewState.isOwnPost ? 1 : 0,
+    viewState.feedbackQuestion || '',
+    viewState.reuseInsight || '',
+    viewState.creatorPrimaryAction?.action || '',
+    viewState.creatorPrimaryAction?.label || '',
+    viewState.creatorNextStep || ''
+  ].join('::');
 }
 
 export function communityPrimaryMetrics(post) {
@@ -164,6 +210,23 @@ export function renderStudioTemplateCards() {
 
 export function renderCommunityCard(post) {
   const downloadPending = helpers.isDownloadPending(post.id, 0);
+  const likePending = helpers.isActionPending('like', post.id);
+  const isOwnPost = helpers.isOwnPost(post);
+  const feedbackQuestion = helpers.feedbackQuestion(post);
+  const reuseInsight = state.communityScope === 'mine' ? helpers.reuseInsightText(post) : '';
+  const creatorPrimaryAction = state.communityScope === 'mine' ? helpers.creatorPrimaryAction(post) : null;
+  const creatorNextStep = state.communityScope === 'mine' ? helpers.creatorNextStep(post) : '';
+  const cacheKey = communityCardCacheKey(post, {
+    downloadPending,
+    likePending,
+    isOwnPost,
+    feedbackQuestion,
+    reuseInsight,
+    creatorPrimaryAction,
+    creatorNextStep
+  });
+  const cached = communityCardCache.get(cacheKey);
+  if (cached) return cached;
   const imageCount = Array.isArray(post.images) && post.images.length ? post.images.length : 1;
   const image = post.imageUrl
     ? `<img src="${escapeHtml(post.imageUrl)}" alt="${escapeHtml(post.title)}" loading="lazy" decoding="async" fetchpriority="low" />`
@@ -176,11 +239,8 @@ export function renderCommunityCard(post) {
   const canReuse = post.canReuse !== false;
   const reuseCount = Number(post.reuseCount || 0);
   const needsFirstComment = Number(post.commentCount || 0) === 0;
-  const isOwnPost = helpers.isOwnPost(post);
   const cardTitle = helpers.cleanDisplayText(post.title || '').slice(0, 60) || '未命名作品';
   const cardDescription = helpers.cleanDisplayText(post.description || '') || '作者暂未填写介绍。';
-  const feedbackQuestion = helpers.feedbackQuestion(post);
-  const reuseInsight = state.communityScope === 'mine' ? helpers.reuseInsightText(post) : '';
   const viewerNextStep = state.communityScope !== 'mine'
     ? (needsFirstComment
       ? '还没有评论，留下第一条具体建议。'
@@ -196,11 +256,10 @@ export function renderCommunityCard(post) {
       `<button type="button" data-community-share="${escapeHtml(post.id)}">复制邀请文案</button>`
     ].filter(Boolean).join('')
     : `<button type="button" data-community-download="${escapeHtml(post.id)}" ${downloadPending ? 'disabled' : ''}>${downloadPending ? '准备下载…' : downloadLabel}</button>`;
-  const creatorPrimaryAction = state.communityScope === 'mine' ? helpers.creatorPrimaryAction(post) : null;
   const cardLikeAction = isOwnPost
     ? '<span class="community-own-work-pill">自己的作品</span>'
-    : `<button class="community-card-primary" type="button" data-community-like="${escapeHtml(post.id)}" ${helpers.isActionPending('like', post.id) ? 'disabled' : ''}>${helpers.isActionPending('like', post.id) ? '处理中…' : (post.liked ? '已赞' : '点赞')}</button>`;
-  return `
+    : `<button class="community-card-primary" type="button" data-community-like="${escapeHtml(post.id)}" ${likePending ? 'disabled' : ''}>${likePending ? '处理中…' : (post.liked ? '已赞' : '点赞')}</button>`;
+  return rememberCommunityCard(cacheKey, `
     <article class="library-card community-card">
       <button class="library-cover community-cover" type="button" data-community-open="${escapeHtml(post.id)}">
         ${image || '<span>暂无预览</span>'}
@@ -219,7 +278,7 @@ export function renderCommunityCard(post) {
         ${reuseInsight ? `<div class="creator-reuse-insight"><span>${escapeHtml(reuseInsight)}</span><button type="button" data-community-open="${escapeHtml(post.id)}">查看参考延展</button></div>` : ''}
         ${state.communityScope === 'mine' ? `
           <div class="creator-card-insight ${creatorPrimaryAction.action === 'reportedFeedback' ? 'is-urgent' : ''}">
-            <span>${escapeHtml(helpers.creatorNextStep(post))}</span>
+            <span>${escapeHtml(creatorNextStep)}</span>
             <button type="button" data-creator-card-action="${creatorPrimaryAction.action}" data-post-id="${escapeHtml(post.id)}">${escapeHtml(creatorPrimaryAction.label)}</button>
           </div>
         ` : ''}
@@ -235,5 +294,9 @@ export function renderCommunityCard(post) {
         </div>
       </div>
     </article>
-  `;
+  `);
+}
+
+export function renderCommunityCards(posts = []) {
+  return posts.map(renderCommunityCard).join('');
 }
