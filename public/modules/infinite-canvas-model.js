@@ -41,6 +41,7 @@ export async function createCanvasNode(payload = {}, kind = 'image', nodeCount =
     id,
     kind: nodeKind,
     src: storedSrc,
+    poster: String(payload.poster || '').trim(),
     imageRef,
     title: String(payload.title || payload.prompt || (nodeKind === 'video' ? '文案视频' : '生成图片')).slice(0, 80),
     prompt: String(payload.prompt || '').slice(0, 1200),

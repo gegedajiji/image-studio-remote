@@ -40,7 +40,7 @@ export async function putCanvasAsset(key, src) {
   });
 }
 
-async function getCanvasAsset(key) {
+export async function getCanvasAsset(key) {
   const db = await openImageDb();
   if (!db) return '';
   return new Promise((resolve) => {
@@ -68,10 +68,8 @@ function serializeNode(node) {
   return next;
 }
 
-async function hydrateNode(node) {
-  const next = { ...node, kind: node?.kind || 'image' };
-  if (!next.imageRef || next.src) return next;
-  return { ...next, src: await getCanvasAsset(next.imageRef) };
+function normalizeNode(node) {
+  return { ...node, kind: node?.kind || 'image' };
 }
 
 export async function readCanvasState(defaultState) {
@@ -84,7 +82,7 @@ export async function readCanvasState(defaultState) {
     if (!raw) return fallback;
     const data = JSON.parse(raw);
     const nodes = Array.isArray(data.nodes)
-      ? await Promise.all(data.nodes.slice(0, maxCanvasNodes).map(hydrateNode))
+      ? data.nodes.slice(0, maxCanvasNodes).map(normalizeNode)
       : [];
     const viewport = data.viewport
       ? {

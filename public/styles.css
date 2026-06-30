@@ -23908,6 +23908,14 @@ body[data-panel="studio"] .infinite-canvas-node img {
   background: #eceff3;
 }
 
+body[data-panel="studio"] .infinite-canvas-node video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #111827;
+}
+
 body[data-panel="studio"] .canvas-video-placeholder,
 body[data-panel="studio"] .canvas-node-image-missing {
   display: grid;

@@ -50,8 +50,12 @@ export function canvasNodeSelector(id) {
 
 export function canvasNodeHtml(node, selectedId = '') {
   const src = node.src || '';
+  const poster = node.poster || '';
   const kind = node.kind || 'image';
   const brokenClass = kind === 'image' && !src ? ' is-missing-image' : '';
+  const videoHtml = src
+    ? `<video src="${escapeHtml(src)}"${poster ? ` poster="${escapeHtml(poster)}"` : ''} controls preload="metadata"></video>`
+    : `<div class="canvas-video-placeholder"><strong>Video</strong><span>${escapeHtml(node.meta || '视频生成占位')}</span></div>`;
   return `
     <article
       class="infinite-canvas-node${brokenClass} ${node.id === selectedId ? 'is-selected' : ''}"
@@ -60,7 +64,7 @@ export function canvasNodeHtml(node, selectedId = '') {
       style="--canvas-node-x:${Number(node.x || 0)}px;--canvas-node-y:${Number(node.y || 0)}px;--canvas-node-w:${Number(node.width || 280)}px"
     >
       ${kind === 'video'
-        ? `<div class="canvas-video-placeholder"><strong>Video</strong><span>${escapeHtml(node.meta || '视频生成占位')}</span></div>`
+        ? videoHtml
         : src
           ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(nodeTitle(node))}" draggable="false" loading="lazy" />`
           : '<div class="canvas-node-image-missing">图片缓存已失效</div>'}

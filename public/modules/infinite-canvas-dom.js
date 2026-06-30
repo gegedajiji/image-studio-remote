@@ -13,6 +13,22 @@ export function renderCanvasNodes(nodes = [], selectedId = '') {
   return true;
 }
 
+export function syncCanvasNodeElements(nodes = [], visibleIds = new Set(), selectedId = '') {
+  const content = $('infiniteCanvasContent');
+  if (!content) return false;
+  const wantedIds = visibleIds instanceof Set ? visibleIds : new Set(visibleIds);
+  content.querySelectorAll('[data-canvas-node]').forEach((element) => {
+    if (!wantedIds.has(element.dataset.canvasNode)) element.remove();
+  });
+  nodes.forEach((node) => {
+    if (!wantedIds.has(node.id)) return;
+    if (!canvasNodeElement(node.id)) {
+      content.insertAdjacentHTML('beforeend', canvasNodeHtml(node, selectedId));
+    }
+  });
+  return true;
+}
+
 export function upsertCanvasNodeElement(node, selectedId = '') {
   const content = $('infiniteCanvasContent');
   if (!content || !node?.id) return false;

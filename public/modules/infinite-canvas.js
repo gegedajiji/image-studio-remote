@@ -1,6 +1,7 @@
 import { $ } from './dom.js';
 import {
   deleteCanvasAsset,
+  getCanvasAsset,
   readCanvasState,
   writeCanvasState
 } from './canvas-store.js';
@@ -16,6 +17,7 @@ import {
   clearCanvasElements,
   removeCanvasNodeElement,
   renderCanvasNodes,
+  syncCanvasNodeElements,
   upsertCanvasNodeElement
 } from './infinite-canvas-dom.js';
 import {
@@ -27,6 +29,9 @@ import {
   nodeTitle,
   selectionSummaryHtml
 } from './infinite-canvas-renderer.js';
+import {
+  visibleCanvasNodeIds
+} from './infinite-canvas-viewport.js';
 
 const canvasState = {
   nodes: [],
@@ -41,10 +46,13 @@ let initialized = false;
 let dragState = null;
 let viewportFrameId = 0;
 let nodeFrameId = 0;
+let visibleFrameId = 0;
 const pendingNodePositionIds = new Set();
 let lastChromeKey = '';
 let lastSelectionKey = '';
 let lastSelectedNodeId = '';
+let lastVisibleKey = '';
+const pendingAssetNodeIds = new Set();
 let hasRenderedCanvas = false;
 let canvasLoaded = false;
 let canvasLoadPromise = null;
@@ -114,6 +122,7 @@ function applyViewportNow() {
   if (!stage) return;
   const { x, y, scale } = canvasState.viewport;
   stage.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  scheduleVisibleNodesSync();
   updateCanvasChrome();
 }
 
@@ -128,10 +137,66 @@ function applyViewport() {
 
 function renderCanvas() {
   const selectedId = canvasState.selectedId;
-  if (!renderCanvasNodes(canvasState.nodes, selectedId)) return;
+  const visibleIds = currentVisibleNodeIds();
+  if (!renderCanvasNodes(canvasState.nodes.filter((node) => visibleIds.has(node.id)), selectedId)) return;
+  lastVisibleKey = visibleKey(visibleIds);
   hasRenderedCanvas = true;
   lastSelectedNodeId = selectedId;
+  loadVisibleNodeAssets(visibleIds);
   applyViewport();
+}
+
+function currentVisibleNodeIds() {
+  return visibleCanvasNodeIds(
+    canvasState.nodes,
+    $('infiniteCanvasViewport'),
+    canvasState.viewport,
+    canvasState.selectedId
+  );
+}
+
+function visibleKey(ids) {
+  return [...ids].sort().join('|');
+}
+
+function syncVisibleNodesNow() {
+  visibleFrameId = 0;
+  if (!hasRenderedCanvas) return;
+  const visibleIds = currentVisibleNodeIds();
+  const nextKey = visibleKey(visibleIds);
+  if (nextKey === lastVisibleKey) return;
+  lastVisibleKey = nextKey;
+  syncCanvasNodeElements(canvasState.nodes, visibleIds, canvasState.selectedId);
+  loadVisibleNodeAssets(visibleIds);
+  syncSelectedNodeClass();
+}
+
+function loadVisibleNodeAssets(visibleIds) {
+  visibleIds.forEach((id) => {
+    const node = canvasState.nodes.find((item) => item.id === id);
+    if (!node || node.kind === 'video' || !node.imageRef || node.src || pendingAssetNodeIds.has(id)) return;
+    pendingAssetNodeIds.add(id);
+    getCanvasAsset(node.imageRef)
+      .then((src) => {
+        if (!src) return;
+        const current = canvasState.nodes.find((item) => item.id === id);
+        if (!current) return;
+        current.src = src;
+        if (canvasNodeElement(id)) {
+          upsertCanvasNodeElement(current, canvasState.selectedId);
+          syncSelectedNodeClass();
+        }
+      })
+      .finally(() => {
+        pendingAssetNodeIds.delete(id);
+      });
+  });
+}
+
+function scheduleVisibleNodesSync() {
+  if (visibleFrameId) return;
+  visibleFrameId = window.requestAnimationFrame?.(syncVisibleNodesNow) || 0;
+  if (!visibleFrameId) syncVisibleNodesNow();
 }
 
 function updateNodePositionElementNow(id) {
@@ -166,6 +231,9 @@ function syncSelectedNodeClass() {
     canvasNodeElement(lastSelectedNodeId)?.classList.remove('is-selected');
   }
   if (canvasState.selectedId) {
+    if (!canvasNodeElement(canvasState.selectedId)) {
+      syncCanvasNodeElements(canvasState.nodes, currentVisibleNodeIds(), canvasState.selectedId);
+    }
     canvasNodeElement(canvasState.selectedId)?.classList.add('is-selected');
   }
   lastSelectedNodeId = canvasState.selectedId;
@@ -428,6 +496,7 @@ async function addNodeToCanvas(payload = {}, kind = 'image') {
   canvasSave.saveNow();
   if (hasRenderedCanvas) {
     removedNodes.forEach((oldNode) => removeCanvasNodeElement(oldNode.id));
+    lastVisibleKey = '';
     upsertCanvasNodeElement(runtimeNode, canvasState.selectedId);
     syncSelectedNodeClass();
     applyViewport();
