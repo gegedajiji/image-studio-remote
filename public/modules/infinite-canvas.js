@@ -11,6 +11,10 @@ import {
   createCanvasNode
 } from './infinite-canvas-model.js';
 import {
+  canvasNodeById,
+  createCanvasNodeIndex
+} from './infinite-canvas-index.js';
+import {
   applyNodePositionElement,
   applyNodeSizeElement,
   canvasNodeElement,
@@ -35,6 +39,7 @@ import {
 
 const canvasState = {
   nodes: [],
+  nodeIndex: createCanvasNodeIndex(),
   selectedId: '',
   viewport: { x: 120, y: 90, scale: 0.78 }
 };
@@ -62,12 +67,17 @@ const canvasSave = createCanvasSaveScheduler({
 });
 
 function selectedNode() {
-  return canvasState.nodes.find((item) => item.id === canvasState.selectedId) || null;
+  return canvasNodeById(canvasState.nodeIndex, canvasState.selectedId);
+}
+
+function syncCanvasNodeIndex() {
+  canvasState.nodeIndex = createCanvasNodeIndex(canvasState.nodes);
 }
 
 async function readCanvas() {
   const data = await readCanvasState(canvasState);
   canvasState.nodes = data.nodes;
+  syncCanvasNodeIndex();
   canvasState.viewport = data.viewport;
 }
 
@@ -173,13 +183,13 @@ function syncVisibleNodesNow() {
 
 function loadVisibleNodeAssets(visibleIds) {
   visibleIds.forEach((id) => {
-    const node = canvasState.nodes.find((item) => item.id === id);
+    const node = canvasNodeById(canvasState.nodeIndex, id);
     if (!node || node.kind === 'video' || !node.imageRef || node.src || pendingAssetNodeIds.has(id)) return;
     pendingAssetNodeIds.add(id);
     getCanvasAsset(node.imageRef)
       .then((src) => {
         if (!src) return;
-        const current = canvasState.nodes.find((item) => item.id === id);
+        const current = canvasNodeById(canvasState.nodeIndex, id);
         if (!current) return;
         current.src = src;
         if (canvasNodeElement(id)) {
@@ -200,12 +210,12 @@ function scheduleVisibleNodesSync() {
 }
 
 function updateNodePositionElementNow(id) {
-  const node = canvasState.nodes.find((item) => item.id === id);
+  const node = canvasNodeById(canvasState.nodeIndex, id);
   applyNodePositionElement(node);
 }
 
 function updateNodeSizeElement(id) {
-  const node = canvasState.nodes.find((item) => item.id === id);
+  const node = canvasNodeById(canvasState.nodeIndex, id);
   applyNodeSizeElement(node);
 }
 
@@ -246,8 +256,9 @@ function selectNode(id) {
 }
 
 async function removeNode(id) {
-  const node = canvasState.nodes.find((item) => item.id === id);
+  const node = canvasNodeById(canvasState.nodeIndex, id);
   canvasState.nodes = canvasState.nodes.filter((node) => node.id !== id);
+  syncCanvasNodeIndex();
   if (canvasState.selectedId === id) canvasState.selectedId = '';
   if (node?.imageRef) await deleteCanvasAsset(node.imageRef);
   canvasSave.saveNow();
@@ -309,6 +320,7 @@ async function clearCanvas() {
     deleteCanvasAsset(node.imageRef);
   });
   canvasState.nodes = [];
+  syncCanvasNodeIndex();
   canvasState.selectedId = '';
   canvasSave.saveNow();
   if (hasRenderedCanvas) {
@@ -342,7 +354,7 @@ function startDrag(event) {
   if (!viewport || event.target.closest('[data-canvas-node-action]')) return;
   const nodeElement = event.target.closest('[data-canvas-node]');
   if (nodeElement) {
-    const node = canvasState.nodes.find((item) => item.id === nodeElement.dataset.canvasNode);
+    const node = canvasNodeById(canvasState.nodeIndex, nodeElement.dataset.canvasNode);
     if (!node) return;
     canvasState.selectedId = node.id;
     dragState = {
@@ -376,7 +388,7 @@ function moveDrag(event) {
   const dx = event.clientX - dragState.startX;
   const dy = event.clientY - dragState.startY;
   if (dragState.type === 'node') {
-    const node = canvasState.nodes.find((item) => item.id === dragState.nodeId);
+    const node = canvasNodeById(canvasState.nodeIndex, dragState.nodeId);
     if (!node) return;
     node.x = dragState.originX + dx / canvasState.viewport.scale;
     node.y = dragState.originY + dy / canvasState.viewport.scale;
@@ -492,6 +504,7 @@ async function addNodeToCanvas(payload = {}, kind = 'image') {
   const { nodes: nextNodes, removedNodes } = appendCanvasNode(canvasState.nodes, runtimeNode);
   removedNodes.filter((oldNode) => oldNode.imageRef).forEach((oldNode) => deleteCanvasAsset(oldNode.imageRef));
   canvasState.nodes = nextNodes;
+  syncCanvasNodeIndex();
   canvasState.selectedId = runtimeNode.id;
   canvasSave.saveNow();
   if (hasRenderedCanvas) {
