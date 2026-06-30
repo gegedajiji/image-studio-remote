@@ -1,0 +1,13 @@
+node_modules
+data
+output
+.playwright-cli
+.DS_Store
+.env
+.env.*
+*.log
+*.bak-*
+public/*.bak-*
+src/*.bak-*
+npm-debug.log*
+youyu-image-studio-source-*.tar.gz

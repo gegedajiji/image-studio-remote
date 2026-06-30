@@ -1,0 +1,28 @@
+{
+  "name": "standalone-image-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/store.js && node --check src/auth.js && node --check src/imageClient.js && node --check public/app.js && node --check scripts/check-store-health.mjs",
+    "health:store": "node scripts/check-store-health.mjs",
+    "migrate:mysql": "node scripts/migrate-store-to-mysql.mjs",
+    "test:store-regression": "node scripts/store-regression.mjs",
+    "smoke:perf": "node scripts/smoke-performance.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "multer": "^2.1.1",
+    "mysql2": "^3.11.5",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "undici": "^7.2.3",
+    "uuid": "^11.0.5"
+  }
+}

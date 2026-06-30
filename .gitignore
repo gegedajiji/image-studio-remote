@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Runtime configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data and generated artifacts
+data/
+output/
+.playwright-cli/
+
+# Logs and local system files
+*.log
+npm-debug.log*
+.DS_Store
+
+# Backups and packaged exports
+*.bak
+*.bak-*
+*.tmp
+youyu-image-studio-source-*.tar.gz
+
+# Legacy root-level frontend snapshots. The app serves public/.
+/app.js
+/index.html
+/styles.css
