@@ -3,6 +3,50 @@ import { escapeHtml } from './format.js';
 import { extensionForFormat, imageSources, outputFormatForImage, parseImageSize } from './image-utils.js';
 import { resultMetaText } from './studio-format.js';
 
+const resultHtmlCacheLimit = 80;
+const resultHtmlCache = new Map();
+
+export function clearResultHtmlCache() {
+  resultHtmlCache.clear();
+}
+
+function rememberResultHtml(cacheKey, html) {
+  resultHtmlCache.set(cacheKey, html);
+  if (resultHtmlCache.size > resultHtmlCacheLimit) {
+    resultHtmlCache.delete(resultHtmlCache.keys().next().value);
+  }
+  return html;
+}
+
+function resultHtmlCacheKey(item, sources) {
+  return [
+    item?.id || '',
+    item?.status || '',
+    item?.updatedAt || '',
+    item?.createdAt || '',
+    item?.prompt || '',
+    item?.title || '',
+    item?.layout || '',
+    item?.size || '',
+    item?.quality || '',
+    item?.count || '',
+    item?.outputFormat || state.outputFormat || '',
+    item?.communityPostId || '',
+    item?.communityPost?.id || '',
+    item?.communityPost?.title || '',
+    item?.reuseSourcePost?.id || '',
+    item?.reuseSourcePost?.title || '',
+    Array.isArray(item?.storyboardPrompts) ? item.storyboardPrompts.join('\n') : '',
+    Array.isArray(item?.images) ? item.images.map((image) => [
+      image?.imageUrl || '',
+      image?.mimeType || '',
+      image?.outputFormat || '',
+      image?.imageBase64 ? String(image.imageBase64).length : ''
+    ].join(':')).join('|') : '',
+    sources.join('|')
+  ].join('::');
+}
+
 export function renderResultActions(item, index, src) {
   const prompt = item?.prompt || '';
   const outputFormat = outputFormatForImage(item?.images?.[index] || item, item?.outputFormat || state.outputFormat);
@@ -96,8 +140,11 @@ export function renderPublishPrompt(item) {
 
 export function renderGeneratedImagesHtml(item) {
   const sources = imageSources(item);
+  const cacheKey = resultHtmlCacheKey(item, sources);
+  const cached = resultHtmlCache.get(cacheKey);
+  if (cached) return cached;
   const gridClass = sources.length > 1 ? 'multi-result' : 'single-result';
-  return `
+  return rememberResultHtml(cacheKey, `
     ${renderPublishPrompt(item)}
     <div class="${gridClass}">
       ${sources.map((src, index) => `
@@ -108,5 +155,5 @@ export function renderGeneratedImagesHtml(item) {
         </article>
       `).join('')}
     </div>
-  `;
+  `);
 }

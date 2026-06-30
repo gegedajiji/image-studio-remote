@@ -3,7 +3,7 @@ import { $, scrollIntoViewSafe } from './dom.js';
 import { copyText, escapeHtml } from './format.js';
 import { imageSources, itemImageSource, sourceToDataUrl } from './image-utils.js';
 import { addImageToCanvas, openInfiniteCanvas } from './infinite-canvas-entry.js';
-import { renderGeneratedImagesHtml } from './result-view.js';
+import { clearResultHtmlCache, renderGeneratedImagesHtml } from './result-view.js';
 import { qualityLabel, resultMetaText, sizeLabelText, trimmedTitle } from './studio-format.js';
 import { scheduleResultLayoutSettle } from './workspace-ui.js';
 
@@ -50,6 +50,7 @@ export function renderPreviewEmpty() {
   if (!preview) return;
   state.previewState = 'empty';
   state.previewItem = null;
+  clearResultHtmlCache();
   setStudioSessionActive(false);
   document.querySelector('.result-thread')?.classList.remove('is-visible');
   preview.classList.remove('loading', 'has-result');
@@ -113,6 +114,7 @@ export function renderFailedGeneration(item, message) {
   if (!preview) return;
   state.previewState = 'failed';
   state.previewItem = item || null;
+  clearResultHtmlCache();
   setStudioSessionActive(true);
   document.querySelector('.result-thread')?.classList.add('is-visible');
   const failedMessage = callbacks.friendlyGenerateError(message || item?.error || '生成失败');
@@ -269,6 +271,7 @@ export function renderGeneratingPreview(item = null) {
   if (!preview) return;
   state.previewState = 'loading';
   state.previewItem = item;
+  clearResultHtmlCache();
   setStudioSessionActive(true);
   const thread = document.querySelector('.result-thread');
   thread?.classList.add('is-visible');
