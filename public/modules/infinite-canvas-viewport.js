@@ -1,4 +1,5 @@
 import { canvasNodeBounds } from './infinite-canvas-renderer.js';
+import { canvasBoundsByNode } from './infinite-canvas-bounds.js';
 
 const renderOverscanPx = 900;
 
@@ -18,12 +19,12 @@ export function rectsIntersect(a, b) {
   return Boolean(a && b && a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top);
 }
 
-export function visibleCanvasNodes(nodes = [], viewportElement, viewport, selectedId = '') {
+export function visibleCanvasNodes(nodes = [], viewportElement, viewport, selectedId = '', boundsCache = null) {
   const rect = visibleCanvasRect(viewportElement, viewport);
   if (!rect) return nodes;
-  return nodes.filter((node) => node.id === selectedId || rectsIntersect(canvasNodeBounds(node), rect));
+  return nodes.filter((node) => node.id === selectedId || rectsIntersect(boundsCache ? canvasBoundsByNode(boundsCache, node) : canvasNodeBounds(node), rect));
 }
 
-export function visibleCanvasNodeIds(nodes = [], viewportElement, viewport, selectedId = '') {
-  return new Set(visibleCanvasNodes(nodes, viewportElement, viewport, selectedId).map((node) => node.id));
+export function visibleCanvasNodeIds(nodes = [], viewportElement, viewport, selectedId = '', boundsCache = null) {
+  return new Set(visibleCanvasNodes(nodes, viewportElement, viewport, selectedId, boundsCache).map((node) => node.id));
 }

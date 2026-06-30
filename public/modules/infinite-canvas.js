@@ -15,6 +15,11 @@ import {
   createCanvasNodeIndex
 } from './infinite-canvas-index.js';
 import {
+  canvasBoundsByNode,
+  createCanvasBoundsCache,
+  setCanvasNodeBounds
+} from './infinite-canvas-bounds.js';
+import {
   applyNodePositionElement,
   applyNodeSizeElement,
   canvasNodeElement,
@@ -25,7 +30,6 @@ import {
   upsertCanvasNodeElement
 } from './infinite-canvas-dom.js';
 import {
-  canvasNodeBounds,
   canvasStatusText,
   clamp,
   maxNodeWidth,
@@ -40,6 +44,7 @@ import {
 const canvasState = {
   nodes: [],
   nodeIndex: createCanvasNodeIndex(),
+  boundsCache: createCanvasBoundsCache(),
   selectedId: '',
   viewport: { x: 120, y: 90, scale: 0.78 }
 };
@@ -74,10 +79,15 @@ function syncCanvasNodeIndex() {
   canvasState.nodeIndex = createCanvasNodeIndex(canvasState.nodes);
 }
 
+function syncCanvasBoundsCache() {
+  canvasState.boundsCache = createCanvasBoundsCache(canvasState.nodes);
+}
+
 async function readCanvas() {
   const data = await readCanvasState(canvasState);
   canvasState.nodes = data.nodes;
   syncCanvasNodeIndex();
+  syncCanvasBoundsCache();
   canvasState.viewport = data.viewport;
 }
 
@@ -161,7 +171,8 @@ function currentVisibleNodeIds() {
     canvasState.nodes,
     $('infiniteCanvasViewport'),
     canvasState.viewport,
-    canvasState.selectedId
+    canvasState.selectedId,
+    canvasState.boundsCache
   );
 }
 
@@ -259,6 +270,7 @@ async function removeNode(id) {
   const node = canvasNodeById(canvasState.nodeIndex, id);
   canvasState.nodes = canvasState.nodes.filter((node) => node.id !== id);
   syncCanvasNodeIndex();
+  canvasState.boundsCache.delete(id);
   if (canvasState.selectedId === id) canvasState.selectedId = '';
   if (node?.imageRef) await deleteCanvasAsset(node.imageRef);
   canvasSave.saveNow();
@@ -282,7 +294,7 @@ function fitCanvasView() {
   if (!viewport || !canvasState.nodes.length) return resetCanvasView();
   const rect = viewport.getBoundingClientRect();
   const bounds = canvasState.nodes.reduce((acc, node) => {
-    const item = canvasNodeBounds(node);
+    const item = canvasBoundsByNode(canvasState.boundsCache, node);
     return {
       left: Math.min(acc.left, item.left),
       top: Math.min(acc.top, item.top),
@@ -307,6 +319,7 @@ function resizeSelectedNode(multiplier) {
   const node = selectedNode();
   if (!node) return;
   node.width = Math.round(clamp(Number(node.width || 280) * multiplier, minNodeWidth, maxNodeWidth));
+  setCanvasNodeBounds(canvasState.boundsCache, node);
   updateNodeSizeElement(node.id);
   updateCanvasChrome();
   canvasSave.scheduleSave();
@@ -321,6 +334,7 @@ async function clearCanvas() {
   });
   canvasState.nodes = [];
   syncCanvasNodeIndex();
+  canvasState.boundsCache = createCanvasBoundsCache();
   canvasState.selectedId = '';
   canvasSave.saveNow();
   if (hasRenderedCanvas) {
@@ -392,6 +406,7 @@ function moveDrag(event) {
     if (!node) return;
     node.x = dragState.originX + dx / canvasState.viewport.scale;
     node.y = dragState.originY + dy / canvasState.viewport.scale;
+    setCanvasNodeBounds(canvasState.boundsCache, node);
     updateNodePositionElement(node.id);
     return;
   }
@@ -505,6 +520,8 @@ async function addNodeToCanvas(payload = {}, kind = 'image') {
   removedNodes.filter((oldNode) => oldNode.imageRef).forEach((oldNode) => deleteCanvasAsset(oldNode.imageRef));
   canvasState.nodes = nextNodes;
   syncCanvasNodeIndex();
+  removedNodes.forEach((oldNode) => canvasState.boundsCache.delete(oldNode.id));
+  setCanvasNodeBounds(canvasState.boundsCache, runtimeNode);
   canvasState.selectedId = runtimeNode.id;
   canvasSave.saveNow();
   if (hasRenderedCanvas) {
