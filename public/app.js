@@ -134,6 +134,12 @@ import {
   parseTags
 } from './modules/community-text.js';
 import {
+  clearCreatorFeedbackSummaryCache,
+  creatorFeedbackSummaryForPost as summarizeCreatorFeedbackForPost,
+  isCreatorFeedbackHandledByState,
+  isCreatorFeedbackReported
+} from './modules/community-feedback-summary.js';
+import {
   adminCommunityHtml,
   adminGenerationLogsHtml,
   adminGenerationUserOptionsHtml,
@@ -403,6 +409,7 @@ function creatorFeedbackHandledMigrationKey() {
 function loadCreatorFeedbackHandledIds() {
   if (!state.user) {
     state.creatorFeedbackHandledIds = [];
+    clearCreatorFeedbackSummaryCache();
     return;
   }
   try {
@@ -414,6 +421,7 @@ function loadCreatorFeedbackHandledIds() {
   } catch {
     state.creatorFeedbackHandledIds = [];
   }
+  clearCreatorFeedbackSummaryCache();
 }
 
 function saveCreatorFeedbackHandledIds() {
@@ -426,10 +434,7 @@ function saveCreatorFeedbackHandledIds() {
 }
 
 function isCreatorFeedbackHandled(id) {
-  const feedbackId = String(id || '');
-  const serverItem = state.creatorFeedbackItems.find((item) => item.id === feedbackId);
-  if (serverItem) return Boolean(serverItem.handled);
-  return state.creatorFeedbackHandledIds.includes(feedbackId);
+  return isCreatorFeedbackHandledByState(state.creatorFeedbackItems, state.creatorFeedbackHandledIds, id);
 }
 
 function setLocalCreatorFeedbackHandled(id, handled) {
@@ -441,6 +446,7 @@ function setLocalCreatorFeedbackHandled(id, handled) {
     state.creatorFeedbackHandledIds = state.creatorFeedbackHandledIds.filter((item) => item !== feedbackId);
   }
   saveCreatorFeedbackHandledIds();
+  clearCreatorFeedbackSummaryCache();
   return true;
 }
 
@@ -478,6 +484,7 @@ async function migrateLocalCreatorFeedbackHandled(items = []) {
     state.creatorFeedbackItems = state.creatorFeedbackItems.map((item) => migratedIds.has(String(item.id || ''))
       ? { ...item, handled: true }
       : item);
+    clearCreatorFeedbackSummaryCache();
     const updatedPosts = new Map();
     results.forEach((result) => {
       if (result.status === 'fulfilled' && result.value?.post?.id) {
@@ -488,6 +495,7 @@ async function migrateLocalCreatorFeedbackHandled(items = []) {
     if (!failed) {
       state.creatorFeedbackHandledIds = state.creatorFeedbackHandledIds.filter((id) => !migratedIds.has(String(id || '')));
       saveCreatorFeedbackHandledIds();
+      clearCreatorFeedbackSummaryCache();
       try {
         if (allCandidates.length <= candidates.length) {
           window.localStorage?.setItem(creatorFeedbackHandledMigrationKey(), 'done');
@@ -515,6 +523,7 @@ async function toggleCreatorFeedbackHandled(id) {
       body: { handled: nextHandled }
     });
     state.creatorFeedbackItems = state.creatorFeedbackItems.map((entry) => entry.id === feedbackId ? { ...entry, handled: nextHandled } : entry);
+    clearCreatorFeedbackSummaryCache();
     setLocalCreatorFeedbackHandled(feedbackId, nextHandled);
     if (data.post) applyCommunityPostUpdate(data.post);
     await loadCreatorFeedback({ silent: true });
@@ -540,6 +549,7 @@ function markCreatorFeedbackHandled(id, { silent = false } = {}) {
   setLocalCreatorFeedbackHandled(feedbackId, true);
   if (item) {
     state.creatorFeedbackItems = state.creatorFeedbackItems.map((entry) => entry.id === feedbackId ? { ...entry, handled: true } : entry);
+    clearCreatorFeedbackSummaryCache();
   }
   if (item) {
     api(`/api/community/posts/${encodeURIComponent(item.postId)}/comments/${encodeURIComponent(item.commentId)}/feedback/handled`, {
@@ -547,11 +557,13 @@ function markCreatorFeedbackHandled(id, { silent = false } = {}) {
       body: { handled: true }
     }).then((data) => {
       state.creatorFeedbackItems = state.creatorFeedbackItems.map((entry) => entry.id === feedbackId ? { ...entry, handled: true } : entry);
+      clearCreatorFeedbackSummaryCache();
       if (data.post) applyCommunityPostUpdate(data.post);
       loadCreatorFeedback({ silent: true }).catch((refreshError) => setStatus(`反馈已处理，但刷新收件箱失败：${refreshError.message}`, true));
     }).catch((error) => {
       setLocalCreatorFeedbackHandled(feedbackId, previousHandled);
       state.creatorFeedbackItems = state.creatorFeedbackItems.map((entry) => entry.id === feedbackId ? { ...entry, handled: previousHandled } : entry);
+      clearCreatorFeedbackSummaryCache();
       if (error.status === 401) {
         requireLoginAfterExpired({ type: 'communityScopeMine', view: 'feedback' });
         setStatus('登录状态已过期，反馈处理状态未同步，请重新登录后再处理。', true);
@@ -878,6 +890,7 @@ function clearCreatorFeedbackState() {
   state.creatorFeedbackTotals = null;
   state.creatorFeedbackPostFilterId = '';
   state.creatorFeedbackLoading = false;
+  clearCreatorFeedbackSummaryCache();
 }
 
 function leavePrivateCommunityView() {
@@ -1089,6 +1102,7 @@ async function loadCreatorFeedback({ silent = false, postId = state.creatorFeedb
       state.creatorFeedbackItems = data.items || [];
       state.creatorFeedbackCounts = data.counts || null;
       state.creatorFeedbackTotals = data.totals || null;
+      clearCreatorFeedbackSummaryCache();
       migrateLocalCreatorFeedbackHandled(state.creatorFeedbackItems).catch(() => {});
     }
     return data;
@@ -1236,10 +1250,6 @@ function filterCreatorFeedbackItems(items = []) {
   if (state.creatorFeedbackFilter === 'reported') return scoped.filter((item) => Number(item.reportCount || 0) > 0);
   if (state.creatorFeedbackFilter === 'reply') return scoped.filter((item) => item.type === 'reply');
   return scoped;
-}
-
-function isCreatorFeedbackReported(item) {
-  return Number(item?.reportCount || 0) > 0;
 }
 
 function creatorFeedbackGroupKey(item) {
@@ -1535,34 +1545,12 @@ function communityCreatorTotals(posts = []) {
 }
 
 function creatorFeedbackSummaryForPost(postId) {
-  const allLocalItems = state.creatorFeedbackItems.filter((item) => item.postId === postId);
-  const items = allLocalItems.filter((item) => isCreatorFeedbackReported(item) || !isCreatorFeedbackHandled(item.id));
-  const reported = items.filter(isCreatorFeedbackReported).length;
-  const replies = items.filter((item) => item.type === 'reply' && !isCreatorFeedbackReported(item)).length;
-  const comments = items.filter((item) => item.type === 'comment' && !isCreatorFeedbackReported(item)).length;
-  if (!allLocalItems.length) {
-    const post = findCommunityPost(postId) || state.historyItems.find((item) => item.communityPostId === postId)?.communityPost || null;
-    if (post?.pendingFeedbackCounts) {
-      const counts = post.pendingFeedbackCounts;
-      const serverComments = Number(counts.comments || 0);
-      const serverReplies = Number(counts.replies || 0);
-      const serverReported = Number(counts.reported || 0);
-      return {
-        total: Number(counts.total || serverComments + serverReplies + serverReported),
-        reported: serverReported,
-        comments: serverComments,
-        replies: serverReplies,
-        normal: Number(counts.normal ?? (serverComments + serverReplies))
-      };
-    }
-  }
-  return {
-    total: items.length,
-    reported,
-    comments,
-    replies,
-    normal: comments + replies
-  };
+  return summarizeCreatorFeedbackForPost({
+    postId,
+    items: state.creatorFeedbackItems,
+    handledIds: state.creatorFeedbackHandledIds,
+    findPost: (id) => findCommunityPost(id) || state.historyItems.find((item) => item.communityPostId === id)?.communityPost || null
+  });
 }
 
 function communityCreatorNextStep(post) {
@@ -2516,6 +2504,7 @@ async function deleteCommunityComment(commentId) {
     if (data.post) {
       state.creatorFeedbackHandledIds = state.creatorFeedbackHandledIds.filter((id) => id !== commentId);
       saveCreatorFeedbackHandledIds();
+      clearCreatorFeedbackSummaryCache();
       if (state.communityScope === 'mine') loadCreatorFeedback({ silent: true }).catch(() => {});
       applyCommunityPostUpdate(data.post);
     }
@@ -4164,6 +4153,7 @@ async function logout() {
     state.apiKeys = [];
     state.apiNewKey = '';
     state.creatorFeedbackHandledIds = [];
+    clearCreatorFeedbackSummaryCache();
     clearCreatorFeedbackState();
     leavePrivateCommunityView();
     sanitizeCommunityStateForViewer();
@@ -4186,6 +4176,7 @@ async function loadMe() {
   } catch (error) {
     state.user = null;
     state.creatorFeedbackHandledIds = [];
+    clearCreatorFeedbackSummaryCache();
     clearCreatorFeedbackState();
     leavePrivateCommunityView();
     sanitizeCommunityStateForViewer();
