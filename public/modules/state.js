@@ -40,6 +40,7 @@ export const state = {
   historyStatusFilter: 'all',
   historyModeFilter: 'all',
   historySearch: '',
+  historyRenderLimit: 48,
   historyPublishPendingIds: [],
   communityPosts: [],
   studioTemplates: [],

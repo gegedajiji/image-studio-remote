@@ -5,6 +5,8 @@ import { imageSources, imageSrc } from './image-utils.js';
 import { qualityLabel, trimmedTitle } from './studio-format.js';
 
 let actions = {};
+const baseHistoryRenderLimit = 48;
+const historyRenderStep = 48;
 
 export function initHistoryPanel(nextActions = {}) {
   actions = { ...nextActions };
@@ -61,11 +63,38 @@ export function renderHistoryList() {
   if (!history) return;
   syncHistoryFilters();
   const count = state.historyItems.length;
+  const renderLimit = Math.max(baseHistoryRenderLimit, Number(state.historyRenderLimit || baseHistoryRenderLimit));
+  const visibleItems = state.historyItems.slice(0, renderLimit);
+  const hasMore = count > visibleItems.length;
   if ($('historyHint')) {
     $('historyHint').textContent = state.historyTotal > count ? `${count}/${state.historyTotal}` : String(count);
   }
-  history.innerHTML = count ? state.historyItems.map(renderHistoryItem).join('') : renderFilteredHistoryEmpty();
+  history.innerHTML = count
+    ? `${visibleItems.map(renderHistoryItem).join('')}${renderHistoryMoreControl(count, visibleItems.length, hasMore)}`
+    : renderFilteredHistoryEmpty();
   bindHistoryItemClicks();
+}
+
+export function resetHistoryRenderLimit() {
+  state.historyRenderLimit = baseHistoryRenderLimit;
+}
+
+function extendHistoryRenderLimit() {
+  state.historyRenderLimit = Math.min(
+    state.historyItems.length,
+    Math.max(baseHistoryRenderLimit, Number(state.historyRenderLimit || baseHistoryRenderLimit)) + historyRenderStep
+  );
+  renderHistoryList();
+}
+
+function renderHistoryMoreControl(total, rendered, hasMore) {
+  if (!hasMore) return '';
+  return `
+    <button class="history-more-button" type="button" data-history-action="showMore">
+      继续显示 ${Math.min(historyRenderStep, total - rendered)} 条
+      <span>${rendered}/${total}</span>
+    </button>
+  `;
 }
 
 function renderHistoryItem(item) {
@@ -131,6 +160,7 @@ function bindHistoryItemClicks() {
   const runHistoryAction = (button) => {
     const id = button.dataset.generationId;
     if (button.dataset.historyAction === 'clearFilters') return actions.clearFilters?.();
+    if (button.dataset.historyAction === 'showMore') return extendHistoryRenderLimit();
     if (button.dataset.historyAction === 'delete') return actions.delete?.(id, button);
     if (button.dataset.historyAction === 'reuse') return actions.reuse?.(id);
     if (button.dataset.historyAction === 'resumePending') return actions.resumePending?.(id, state.historyItems.find((entry) => entry.id === id));

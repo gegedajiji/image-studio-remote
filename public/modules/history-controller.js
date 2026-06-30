@@ -2,7 +2,12 @@ import { state } from './state.js';
 import { $ } from './dom.js';
 import { api } from './api-client.js';
 import { createDebouncer } from './scheduler.js';
-import { historyHasActiveFilters, historyQueryString, renderHistoryList } from './history-panel.js';
+import {
+  historyHasActiveFilters,
+  historyQueryString,
+  renderHistoryList,
+  resetHistoryRenderLimit
+} from './history-panel.js';
 
 const scheduleHistorySearch = createDebouncer(260);
 
@@ -20,6 +25,7 @@ export function initHistoryController(nextCallbacks = {}) {
 
 export async function loadHistory() {
   const loadToken = ++state.historyLoadToken;
+  resetHistoryRenderLimit();
   if (!state.user) {
     state.historyItems = [];
     state.historyTotal = 0;
@@ -42,6 +48,7 @@ export async function clearHistoryFilters() {
   state.historySearch = '';
   state.historyStatusFilter = 'all';
   state.historyModeFilter = 'all';
+  resetHistoryRenderLimit();
   await loadHistory();
 }
 
@@ -162,17 +169,20 @@ export function bindHistoryControls() {
   if (clearButton) clearButton.onclick = clearHistory;
   $('historySearchInput')?.addEventListener('input', (event) => {
     state.historySearch = event.target.value;
+    resetHistoryRenderLimit();
     scheduleHistorySearch(() => loadHistory().catch((error) => callbacks.setStatus(error.message, true)));
   });
   document.querySelectorAll('[data-history-status]').forEach((button) => {
     button.onclick = () => {
       state.historyStatusFilter = ['all', 'pending', 'unpublished', 'published', 'failed'].includes(button.dataset.historyStatus) ? button.dataset.historyStatus : 'all';
+      resetHistoryRenderLimit();
       loadHistory().catch((error) => callbacks.setStatus(error.message, true));
     };
   });
   document.querySelectorAll('[data-history-mode]').forEach((button) => {
     button.onclick = () => {
       state.historyModeFilter = button.dataset.historyMode === 'edit' ? 'edit' : button.dataset.historyMode === 'generate' ? 'generate' : 'all';
+      resetHistoryRenderLimit();
       loadHistory().catch((error) => callbacks.setStatus(error.message, true));
     };
   });
