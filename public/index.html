@@ -254,10 +254,21 @@
 
           <section class="infinite-canvas-panel" id="infiniteCanvasPanel" hidden aria-hidden="true" aria-labelledby="infiniteCanvasTitle">
             <header class="infinite-canvas-head">
-              <div>
+              <div class="canvas-head-copy">
                 <span class="feature-kicker">Canvas</span>
                 <h2 id="infiniteCanvasTitle">无限画布</h2>
                 <p id="canvasStatus">暂无图片，先从生成结果或历史记录放入画布。</p>
+                <div class="canvas-search-row">
+                  <label class="canvas-search" aria-label="搜索画布节点">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                    <input id="canvasSearchInput" type="search" placeholder="搜索节点标题、提示词或备注" />
+                  </label>
+                  <div class="canvas-kind-filter" role="group" aria-label="画布类型筛选">
+                    <button class="active" type="button" data-canvas-kind-filter="all">全部</button>
+                    <button type="button" data-canvas-kind-filter="image">图片</button>
+                    <button type="button" data-canvas-kind-filter="video">视频</button>
+                  </div>
+                </div>
               </div>
               <div class="canvas-toolbar" aria-label="无限画布工具">
                 <button type="button" id="canvasZoomOutBtn" aria-label="缩小" title="缩小">-</button>

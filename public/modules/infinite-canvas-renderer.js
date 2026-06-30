@@ -18,10 +18,26 @@ export function nodeKindText(node) {
   return node?.kind === 'video' ? '视频节点' : '图片节点';
 }
 
-export function canvasStatusText(count) {
-  return count
-    ? `${count} 个节点 · 可拖拽排版，滚轮缩放`
-    : '暂无图片，先从生成结果或历史记录放入画布。';
+export function canvasNodeSearchText(node) {
+  return [
+    nodeTitle(node),
+    String(node?.prompt || ''),
+    String(node?.meta || ''),
+    node?.kind === 'video' ? '视频' : '图片'
+  ].join(' ').toLowerCase();
+}
+
+export function canvasStatusText(totalCount, visibleCount = totalCount, filtered = false) {
+  if (!totalCount) {
+    return '暂无图片，先从生成结果或历史记录放入画布。';
+  }
+  if (filtered && visibleCount <= 0) {
+    return '没有匹配的节点，清空筛选后再看看。';
+  }
+  if (filtered && visibleCount < totalCount) {
+    return `${visibleCount}/${totalCount} 个节点匹配筛选 · 可拖拽排版，滚轮缩放`;
+  }
+  return `${totalCount} 个节点 · 可拖拽排版，滚轮缩放`;
 }
 
 export function selectionSummaryHtml(node) {

@@ -16,6 +16,7 @@ import {
 } from './infinite-canvas-index.js';
 import {
   canvasBoundsByNode,
+  canvasContentBounds,
   createCanvasBoundsCache,
   setCanvasNodeBounds
 } from './infinite-canvas-bounds.js';
@@ -30,6 +31,7 @@ import {
   upsertCanvasNodeElement
 } from './infinite-canvas-dom.js';
 import {
+  canvasNodeSearchText,
   canvasStatusText,
   clamp,
   maxNodeWidth,
@@ -62,14 +64,77 @@ let lastChromeKey = '';
 let lastSelectionKey = '';
 let lastSelectedNodeId = '';
 let lastVisibleKey = '';
+let lastCanvasStageKey = '';
+let lastCanvasVisibleCount = 0;
 const pendingAssetNodeIds = new Set();
 let hasRenderedCanvas = false;
 let canvasLoaded = false;
 let canvasLoadPromise = null;
+const canvasUiState = {
+  search: '',
+  kindFilter: 'all'
+};
+const minCanvasStageWidth = 2400;
+const minCanvasStageHeight = 1800;
+const canvasStagePadding = 640;
 const canvasSave = createCanvasSaveScheduler({
   save: () => writeCanvasState(canvasState),
   onError: () => callbacks.onStatus('画布已更新，但浏览器本地存储空间不足，刷新后可能无法保留。', true)
 });
+
+function canvasFilterQuery() {
+  return String(canvasUiState.search || '').trim().toLowerCase();
+}
+
+function syncCanvasFilterControls() {
+  const search = $('canvasSearchInput');
+  if (search && search.value !== canvasUiState.search) search.value = canvasUiState.search;
+  document.querySelectorAll('[data-canvas-kind-filter]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.canvasKindFilter === canvasUiState.kindFilter);
+  });
+}
+
+function setCanvasSearch(value = '') {
+  canvasUiState.search = String(value || '').slice(0, 120);
+  syncCanvasFilterControls();
+}
+
+function setCanvasKindFilter(kind = 'all') {
+  canvasUiState.kindFilter = ['all', 'image', 'video'].includes(kind) ? kind : 'all';
+  syncCanvasFilterControls();
+}
+
+function canvasNodeMatchesFilter(node) {
+  if (!node) return false;
+  if (node.id === canvasState.selectedId) return true;
+  if (canvasUiState.kindFilter !== 'all' && node.kind !== canvasUiState.kindFilter) return false;
+  const query = canvasFilterQuery();
+  if (!query) return true;
+  return canvasNodeSearchText(node).includes(query);
+}
+
+function syncCanvasStageDimensions(force = false) {
+  const stage = $('infiniteCanvasStage');
+  if (!stage) return;
+  const viewport = $('infiniteCanvasViewport');
+  const viewportRect = viewport?.getBoundingClientRect();
+  const bounds = canvasContentBounds(canvasState.nodes, canvasState.boundsCache);
+  const width = Math.max(
+    minCanvasStageWidth,
+    Math.ceil((viewportRect?.width || 0) * 1.5) || minCanvasStageWidth,
+    Math.ceil((bounds?.right || 0) + canvasStagePadding)
+  );
+  const height = Math.max(
+    minCanvasStageHeight,
+    Math.ceil((viewportRect?.height || 0) * 1.5) || minCanvasStageHeight,
+    Math.ceil((bounds?.bottom || 0) + canvasStagePadding)
+  );
+  const stageKey = `${width}x${height}`;
+  if (!force && stageKey === lastCanvasStageKey) return;
+  lastCanvasStageKey = stageKey;
+  stage.style.setProperty('--canvas-stage-width', `${width}px`);
+  stage.style.setProperty('--canvas-stage-height', `${height}px`);
+}
 
 function selectedNode() {
   return canvasNodeById(canvasState.nodeIndex, canvasState.selectedId);
@@ -89,6 +154,7 @@ async function readCanvas() {
   syncCanvasNodeIndex();
   syncCanvasBoundsCache();
   canvasState.viewport = data.viewport;
+  syncCanvasStageDimensions(true);
 }
 
 function ensureCanvasLoaded() {
@@ -112,12 +178,14 @@ function updateCanvasChrome() {
   const status = $('canvasStatus');
   const selectionBar = $('canvasSelectionBar');
   const selected = selectedNode();
-  const chromeKey = `${Math.round(canvasState.viewport.scale * 100)}:${canvasState.nodes.length}:${selected?.id || ''}`;
+  const filtered = Boolean(canvasUiState.search.trim() || canvasUiState.kindFilter !== 'all');
+  const chromeKey = `${Math.round(canvasState.viewport.scale * 100)}:${canvasState.nodes.length}:${lastCanvasVisibleCount}:${selected?.id || ''}:${canvasUiState.search}:${canvasUiState.kindFilter}`;
   if (chromeKey !== lastChromeKey) {
     lastChromeKey = chromeKey;
     if (zoomLabel) zoomLabel.textContent = `${Math.round(canvasState.viewport.scale * 100)}%`;
     if (status) {
-      status.textContent = canvasStatusText(canvasState.nodes.length);
+      const visibleCount = filtered ? lastCanvasVisibleCount : (lastCanvasVisibleCount || canvasState.nodes.length);
+      status.textContent = canvasStatusText(canvasState.nodes.length, visibleCount, filtered);
     }
     ['canvasNodeShrinkBtn', 'canvasNodeGrowBtn'].forEach((id) => {
       const button = $(id);
@@ -158,12 +226,21 @@ function applyViewport() {
 function renderCanvas() {
   const selectedId = canvasState.selectedId;
   const visibleIds = currentVisibleNodeIds();
-  if (!renderCanvasNodes(canvasState.nodes.filter((node) => visibleIds.has(node.id)), selectedId)) return;
+  lastCanvasVisibleCount = visibleIds.size;
+  syncCanvasStageDimensions();
+  const visibleNodes = canvasState.nodes.filter((node) => visibleIds.has(node.id));
+  if (!hasRenderedCanvas) {
+    if (!renderCanvasNodes(visibleNodes, selectedId)) return;
+    hasRenderedCanvas = true;
+  } else {
+    syncCanvasNodeElements(visibleNodes, visibleIds, selectedId);
+  }
   lastVisibleKey = visibleKey(visibleIds);
-  hasRenderedCanvas = true;
   lastSelectedNodeId = selectedId;
   loadVisibleNodeAssets(visibleIds);
   applyViewport();
+  syncSelectedNodeClass();
+  updateCanvasChrome();
 }
 
 function currentVisibleNodeIds() {
@@ -172,7 +249,8 @@ function currentVisibleNodeIds() {
     $('infiniteCanvasViewport'),
     canvasState.viewport,
     canvasState.selectedId,
-    canvasState.boundsCache
+    canvasState.boundsCache,
+    canvasNodeMatchesFilter
   );
 }
 
@@ -184,6 +262,7 @@ function syncVisibleNodesNow() {
   visibleFrameId = 0;
   if (!hasRenderedCanvas) return;
   const visibleIds = currentVisibleNodeIds();
+  lastCanvasVisibleCount = visibleIds.size;
   const nextKey = visibleKey(visibleIds);
   if (nextKey === lastVisibleKey) return;
   lastVisibleKey = nextKey;
@@ -293,17 +372,16 @@ function fitCanvasView() {
   const viewport = $('infiniteCanvasViewport');
   if (!viewport || !canvasState.nodes.length) return resetCanvasView();
   const rect = viewport.getBoundingClientRect();
-  const bounds = canvasState.nodes.reduce((acc, node) => {
-    const item = canvasBoundsByNode(canvasState.boundsCache, node);
-    return {
-      left: Math.min(acc.left, item.left),
-      top: Math.min(acc.top, item.top),
-      right: Math.max(acc.right, item.right),
-      bottom: Math.max(acc.bottom, item.bottom)
-    };
-  }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
-  const contentWidth = Math.max(1, bounds.right - bounds.left);
-  const contentHeight = Math.max(1, bounds.bottom - bounds.top);
+  const bounds = canvasContentBounds(canvasState.nodes, canvasState.boundsCache) || {
+    left: 0,
+    top: 0,
+    right: rect.width,
+    bottom: rect.height,
+    width: rect.width,
+    height: rect.height
+  };
+  const contentWidth = Math.max(1, bounds.width || (bounds.right - bounds.left));
+  const contentHeight = Math.max(1, bounds.height || (bounds.bottom - bounds.top));
   const padding = 96;
   const scale = clamp(Math.min((rect.width - padding) / contentWidth, (rect.height - padding) / contentHeight), 0.28, 1.25);
   canvasState.viewport = {
@@ -321,6 +399,7 @@ function resizeSelectedNode(multiplier) {
   node.width = Math.round(clamp(Number(node.width || 280) * multiplier, minNodeWidth, maxNodeWidth));
   setCanvasNodeBounds(canvasState.boundsCache, node);
   updateNodeSizeElement(node.id);
+  syncCanvasStageDimensions();
   updateCanvasChrome();
   canvasSave.scheduleSave();
 }
@@ -329,13 +408,12 @@ async function clearCanvas() {
   await ensureCanvasLoaded();
   if (!canvasState.nodes.length) return;
   if (!window.confirm('确认清空当前无限画布？')) return;
-  canvasState.nodes.filter((node) => node.imageRef).forEach((node) => {
-    deleteCanvasAsset(node.imageRef);
-  });
+  await Promise.all(canvasState.nodes.filter((node) => node.imageRef).map((node) => deleteCanvasAsset(node.imageRef)));
   canvasState.nodes = [];
   syncCanvasNodeIndex();
   canvasState.boundsCache = createCanvasBoundsCache();
   canvasState.selectedId = '';
+  syncCanvasStageDimensions(true);
   canvasSave.saveNow();
   if (hasRenderedCanvas) {
     clearCanvasElements();
@@ -407,6 +485,7 @@ function moveDrag(event) {
     node.x = dragState.originX + dx / canvasState.viewport.scale;
     node.y = dragState.originY + dy / canvasState.viewport.scale;
     setCanvasNodeBounds(canvasState.boundsCache, node);
+    syncCanvasStageDimensions();
     updateNodePositionElement(node.id);
     return;
   }
@@ -450,6 +529,25 @@ function bindCanvasEvents() {
     const node = event.target.closest('[data-canvas-node]');
     selectNode(node?.dataset.canvasNode || '');
   });
+  $('canvasSearchInput')?.addEventListener('input', (event) => {
+    setCanvasSearch(event.target.value || '');
+    lastVisibleKey = '';
+    renderCanvas();
+  });
+  $('canvasSearchInput')?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    setCanvasSearch('');
+    lastVisibleKey = '';
+    renderCanvas();
+    event.currentTarget?.blur?.();
+  });
+  document.querySelectorAll('[data-canvas-kind-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      setCanvasKindFilter(button.dataset.canvasKindFilter || 'all');
+      lastVisibleKey = '';
+      renderCanvas();
+    });
+  });
   $('canvasCloseBtn')?.addEventListener('click', closeInfiniteCanvas);
   $('canvasResetBtn')?.addEventListener('click', resetCanvasView);
   $('canvasFitBtn')?.addEventListener('click', fitCanvasView);
@@ -488,6 +586,7 @@ export function initInfiniteCanvas(options = {}) {
   if (initialized) return;
   initialized = true;
   bindCanvasEvents();
+  syncCanvasFilterControls();
 }
 
 export function openInfiniteCanvas() {
@@ -499,6 +598,7 @@ export function openInfiniteCanvas() {
   ensureCanvasLoaded().then(() => {
     if (!hasRenderedCanvas) renderCanvas();
     else applyViewportNow();
+    syncCanvasFilterControls();
     window.requestAnimationFrame?.(() => {
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -523,6 +623,7 @@ async function addNodeToCanvas(payload = {}, kind = 'image') {
   removedNodes.forEach((oldNode) => canvasState.boundsCache.delete(oldNode.id));
   setCanvasNodeBounds(canvasState.boundsCache, runtimeNode);
   canvasState.selectedId = runtimeNode.id;
+  syncCanvasStageDimensions();
   canvasSave.saveNow();
   if (hasRenderedCanvas) {
     removedNodes.forEach((oldNode) => removeCanvasNodeElement(oldNode.id));

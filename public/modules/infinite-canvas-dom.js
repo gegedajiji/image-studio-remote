@@ -3,7 +3,7 @@ import { canvasNodeHtml, canvasNodeSelector } from './infinite-canvas-renderer.j
 
 export function canvasNodeElement(id) {
   if (!id) return null;
-  return document.querySelector(canvasNodeSelector(id));
+  return $('infiniteCanvasContent')?.querySelector(canvasNodeSelector(id)) || null;
 }
 
 export function renderCanvasNodes(nodes = [], selectedId = '') {

@@ -18,3 +18,30 @@ export function setCanvasNodeBounds(cache, node) {
   if (!node?.id || !(cache instanceof Map)) return;
   cache.set(node.id, canvasNodeBounds(node));
 }
+
+export function canvasContentBounds(nodes = [], cache = null) {
+  if (!Array.isArray(nodes) || !nodes.length) return null;
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  let hasNode = false;
+  nodes.forEach((node) => {
+    const bounds = canvasBoundsByNode(cache, node);
+    if (!bounds) return;
+    hasNode = true;
+    left = Math.min(left, bounds.left);
+    top = Math.min(top, bounds.top);
+    right = Math.max(right, bounds.right);
+    bottom = Math.max(bottom, bounds.bottom);
+  });
+  if (!hasNode) return null;
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top)
+  };
+}

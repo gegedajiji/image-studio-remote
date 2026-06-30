@@ -19,12 +19,19 @@ export function rectsIntersect(a, b) {
   return Boolean(a && b && a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top);
 }
 
-export function visibleCanvasNodes(nodes = [], viewportElement, viewport, selectedId = '', boundsCache = null) {
+export function visibleCanvasNodes(nodes = [], viewportElement, viewport, selectedId = '', boundsCache = null, predicate = null) {
   const rect = visibleCanvasRect(viewportElement, viewport);
   if (!rect) return nodes;
-  return nodes.filter((node) => node.id === selectedId || rectsIntersect(boundsCache ? canvasBoundsByNode(boundsCache, node) : canvasNodeBounds(node), rect));
+  const matches = typeof predicate === 'function' ? predicate : null;
+  return nodes.filter((node) => (
+    node.id === selectedId
+    || (
+      (!matches || matches(node))
+      && rectsIntersect(boundsCache ? canvasBoundsByNode(boundsCache, node) : canvasNodeBounds(node), rect)
+    )
+  ));
 }
 
-export function visibleCanvasNodeIds(nodes = [], viewportElement, viewport, selectedId = '', boundsCache = null) {
-  return new Set(visibleCanvasNodes(nodes, viewportElement, viewport, selectedId, boundsCache).map((node) => node.id));
+export function visibleCanvasNodeIds(nodes = [], viewportElement, viewport, selectedId = '', boundsCache = null, predicate = null) {
+  return new Set(visibleCanvasNodes(nodes, viewportElement, viewport, selectedId, boundsCache, predicate).map((node) => node.id));
 }
