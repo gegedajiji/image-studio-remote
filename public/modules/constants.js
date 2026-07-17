@@ -47,6 +47,8 @@ export const historyWidthStorageKey = 'onetop-history-width-v1';
 export const composerHeightStorageKey = 'onetop-composer-height-v1';
 export const creatorFeedbackHandledStoragePrefix = 'onetop-creator-feedback-handled-v1';
 export const creatorFeedbackHandledMigrationPrefix = 'onetop-creator-feedback-handled-migrated-v1';
+export const studioCompactMediaQuery = '(max-width: 1180px)';
+export const studioCompactWidth = 1180;
 
 export const defaultAgentModel = 'gpt-5.4-mini';
 

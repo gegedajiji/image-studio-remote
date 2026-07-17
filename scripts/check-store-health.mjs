@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 
 const rootDir = process.cwd();
 const dataDir = path.join(rootDir, 'data');
@@ -86,58 +86,49 @@ function readJsonDb() {
 
 function readSqliteCounts() {
   if (!fs.existsSync(sqlitePath)) return null;
-  const result = spawnSync('sqlite3', [
-    '-batch',
-    '-noheader',
-    sqlitePath,
-    'select collection || "|" || count(*) from object_snapshot group by collection order by collection;'
-  ], { encoding: 'utf8' });
-  if (result.status !== 0) {
-    fail(`sqlite3 read failed: ${(result.stderr || '').trim() || result.status}`);
+  let db = null;
+  try {
+    db = new DatabaseSync(sqlitePath, { readOnly: true });
+    const rows = db.prepare('select collection, count(*) as count from object_snapshot group by collection order by collection;').all();
+    return Object.fromEntries(rows.map((row) => [row.collection, Number(row.count || 0)]));
+  } catch (error) {
+    fail(`sqlite read failed: ${error.message}`);
     return null;
+  } finally {
+    db?.close();
   }
-  return Object.fromEntries(
-    result.stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const [collection, count] = line.split('|');
-        return [collection, Number(count || 0)];
-      })
-  );
 }
 
 function readSqliteGenerationJobs() {
   if (!fs.existsSync(sqlitePath)) return null;
-  const tableCheck = spawnSync('sqlite3', [
-    '-batch',
-    '-noheader',
-    sqlitePath,
-    "select count(*) from sqlite_master where type='table' and name='generation_jobs';"
-  ], { encoding: 'utf8' });
-  if (tableCheck.status !== 0) {
-    fail(`sqlite generation_jobs table check failed: ${(tableCheck.stderr || '').trim() || tableCheck.status}`);
+  let db = null;
+  try {
+    db = new DatabaseSync(sqlitePath, { readOnly: true });
+    const table = db.prepare("select count(*) as count from sqlite_master where type='table' and name='generation_jobs';").get();
+    if (Number(table?.count || 0) < 1) return null;
+    return db.prepare(`
+      select
+        generation_id as generationId,
+        status,
+        payload,
+        lease_owner as leaseOwner,
+        lease_until as leaseUntil
+      from generation_jobs
+      where status in ('queued','running')
+      order by generation_id;
+    `).all().map((row) => ({
+      generationId: row.generationId,
+      status: row.status,
+      payload: row.payload,
+      leaseOwner: row.leaseOwner,
+      leaseUntil: Number(row.leaseUntil || 0)
+    }));
+  } catch (error) {
+    fail(`sqlite generation_jobs read failed: ${error.message}`);
     return null;
+  } finally {
+    db?.close();
   }
-  if (Number((tableCheck.stdout || '').trim() || 0) < 1) return null;
-  const result = spawnSync('sqlite3', [
-    '-batch',
-    '-separator',
-    '|',
-    sqlitePath,
-    "select generation_id, status, payload, lease_owner, lease_until from generation_jobs where status in ('queued','running') order by generation_id;"
-  ], { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
-  if (result.status !== 0) {
-    fail(`sqlite generation_jobs read failed: ${(result.stderr || '').trim() || result.status}`);
-    return null;
-  }
-  return result.stdout
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [generationId, status, payload, leaseOwner, leaseUntil] = line.split('|');
-      return { generationId, status, payload, leaseOwner, leaseUntil: Number(leaseUntil || 0) };
-    });
 }
 
 function listFileGenerationJobs() {

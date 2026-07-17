@@ -99,6 +99,14 @@ export async function resumePendingGeneration(id, summary = null) {
       await callbacks.loadHistory();
       return;
     }
+    const pendingGeneration = error.payload?.generation?.status === 'pending' ? error.payload.generation : null;
+    if (error.generationStillPending || pendingGeneration) {
+      renderGeneratingPreview(pendingGeneration || summary);
+      callbacks.setPreviewMeta(pendingGeneration ? pendingGenerationMeta(pendingGeneration) : '生成中 · 状态读取暂时中断');
+      callbacks.setStatus(error.message || '任务仍在后台生成，可以稍后从历史记录继续查看。');
+      await callbacks.loadHistory();
+      return;
+    }
     document.getElementById('preview')?.classList.remove('loading');
     const failedMessage = friendlyGenerateError(error.payload?.generation?.error || error.message);
     renderFailedGeneration(error.payload?.generation || summary, failedMessage);

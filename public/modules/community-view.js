@@ -175,13 +175,19 @@ export function communityTemplateImageUrl(post) {
 }
 
 export function studioTemplatesForRender() {
-  return fallbackStudioTemplates().slice(0, 4);
+  const liveTemplates = Array.isArray(state.studioTemplates) ? state.studioTemplates : [];
+  const templates = liveTemplates.length ? liveTemplates : fallbackStudioTemplates();
+  return templates.slice(0, 4);
 }
 
 export function renderStudioTemplateCards() {
   const grid = $('studioTemplateGrid');
   if (!grid) return;
   const templates = studioTemplatesForRender();
+  if (state.studioTemplatesLoading && !templates.length) {
+    grid.innerHTML = '<p class="feature-empty">正在读取交流区模板…</p>';
+    return;
+  }
   const renderKey = templates.map((item, index) => [
     index,
     item.id || '',

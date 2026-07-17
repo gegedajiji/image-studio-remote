@@ -53,7 +53,7 @@ export function normalizeImageIndexSelection(indexes, entries, fallbackIndex = 0
 export async function sourceToDataUrl(src) {
   if (!src) throw new Error('图片不存在');
   if (src.startsWith('data:')) return src;
-  const response = await fetch(src, { cache: 'no-store' });
+  const response = await fetch(src);
   if (!response.ok) throw new Error('源图读取失败');
   const blob = await response.blob();
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) {

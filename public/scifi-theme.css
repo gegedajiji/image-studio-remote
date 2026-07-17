@@ -1,0 +1,2057 @@
+/*
+ * Graphite orbital-console theme for the in-app studio routes.
+ * Load after styles.css and studio-refactor.css. The data-panel scope keeps
+ * the independent home page and its home.css untouched.
+ */
+
+html body.studio-layout-v2[data-panel] {
+  --scifi-bg: #070a0c;
+  --scifi-bg-raised: #0a0f12;
+  --scifi-panel: rgba(12, 18, 22, 0.94);
+  --scifi-panel-solid: #0c1216;
+  --scifi-panel-soft: #10181d;
+  --scifi-panel-strong: #142027;
+  --scifi-line: rgba(132, 184, 189, 0.18);
+  --scifi-line-strong: rgba(102, 220, 224, 0.42);
+  --scifi-grid: rgba(104, 181, 186, 0.055);
+  --scifi-text: #e7f0f1;
+  --scifi-text-strong: #f5fbfb;
+  --scifi-muted: #8da1a7;
+  --scifi-muted-strong: #b5c5c9;
+  --scifi-cyan: #63d9dd;
+  --scifi-cyan-strong: #9af1f0;
+  --scifi-cyan-deep: #125e65;
+  --scifi-cyan-soft: rgba(50, 188, 194, 0.12);
+  --scifi-green: #67d391;
+  --scifi-green-soft: rgba(63, 190, 111, 0.12);
+  --scifi-orange: #f0a24b;
+  --scifi-orange-soft: rgba(240, 162, 75, 0.12);
+  --scifi-red: #ff776d;
+  --scifi-red-soft: rgba(255, 119, 109, 0.12);
+  --scifi-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+  --scifi-radius: 8px;
+
+  --studio-refactor-bg: var(--scifi-bg) !important;
+  --studio-refactor-surface: var(--scifi-panel) !important;
+  --studio-refactor-surface-solid: var(--scifi-panel-solid) !important;
+  --studio-refactor-subtle: var(--scifi-panel-soft) !important;
+  --studio-refactor-line: var(--scifi-line) !important;
+  --studio-refactor-line-strong: var(--scifi-line-strong) !important;
+  --studio-refactor-ink: var(--scifi-text) !important;
+  --studio-refactor-muted: var(--scifi-muted) !important;
+  --studio-refactor-accent: var(--scifi-cyan-deep) !important;
+  --studio-refactor-accent-soft: var(--scifi-cyan-soft) !important;
+  --studio-refactor-warm: var(--scifi-orange) !important;
+  --studio-refactor-radius: var(--scifi-radius) !important;
+  --panel-bg: var(--scifi-bg-raised) !important;
+  --panel-border: var(--scifi-line) !important;
+  --panel-border-strong: var(--scifi-line-strong) !important;
+  --panel-ink: var(--scifi-text) !important;
+  --panel-muted: var(--scifi-muted) !important;
+  --panel-blue: var(--scifi-cyan) !important;
+  --panel-blue-soft: var(--scifi-cyan-soft) !important;
+  --app-accent: var(--scifi-cyan-deep) !important;
+  --app-accent-2: #17818a !important;
+  --app-accent-soft: var(--scifi-cyan-soft) !important;
+
+  color-scheme: dark !important;
+  color: var(--scifi-text) !important;
+  background-color: var(--scifi-bg) !important;
+  background-image:
+    linear-gradient(var(--scifi-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--scifi-grid) 1px, transparent 1px) !important;
+  background-size: 40px 40px !important;
+  font-family: "Avenir Next", "Noto Sans SC", "PingFang SC", sans-serif !important;
+  letter-spacing: 0 !important;
+}
+
+html body.studio-layout-v2[data-panel] ::selection {
+  color: #041012;
+  background: var(--scifi-cyan);
+}
+
+html body.studio-layout-v2[data-panel] :is(*, *::before, *::after) {
+  box-sizing: border-box;
+  letter-spacing: 0 !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(button, input, textarea, select) {
+  font: inherit !important;
+}
+
+html body.studio-layout-v2[data-panel] button,
+html body.studio-layout-v2[data-panel] :is(.select-pill, .ready-pill, #previewMeta) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(button, a, label) {
+  touch-action: manipulation;
+}
+
+html body.studio-layout-v2[data-panel] :is(button, a, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--scifi-cyan) !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px rgba(99, 217, 221, 0.10) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.sidebar-scrollable, .workspace-content, .history, .agent-messages, .agent-conversation-list, .api-reference, .admin-console-main) {
+  scrollbar-color: rgba(99, 217, 221, 0.38) rgba(255, 255, 255, 0.035) !important;
+  scrollbar-width: thin !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.sidebar-scrollable, .workspace-content, .history, .agent-messages, .agent-conversation-list, .api-reference, .admin-console-main)::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.sidebar-scrollable, .workspace-content, .history, .agent-messages, .agent-conversation-list, .api-reference, .admin-console-main)::-webkit-scrollbar-thumb {
+  border: 2px solid transparent !important;
+  border-radius: 8px !important;
+  background: rgba(99, 217, 221, 0.34) !important;
+  background-clip: padding-box !important;
+}
+
+/* App shell and navigation */
+html body.studio-layout-v2[data-panel] .studio-shell {
+  min-width: 0 !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.studio-rail, .history-panel, .workspace) {
+  min-width: 0 !important;
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: var(--scifi-radius) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel) !important;
+  box-shadow: var(--scifi-shadow) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html body.studio-layout-v2[data-panel] .workspace {
+  background-color: rgba(7, 11, 14, 0.94) !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.026) 1px, transparent 1px) !important;
+  background-size: 48px 48px !important;
+}
+
+html body.studio-layout-v2[data-panel] .workspace-content {
+  min-width: 0 !important;
+  color: var(--scifi-text) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel] .workspace-header {
+  position: relative !important;
+  overflow: hidden !important;
+  border-color: var(--scifi-line) !important;
+  background: rgba(8, 13, 16, 0.88) !important;
+  box-shadow: inset 0 1px 0 rgba(99, 217, 221, 0.12) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(112%) !important;
+  backdrop-filter: blur(8px) saturate(112%) !important;
+}
+
+html body.studio-layout-v2[data-panel] .workspace-header::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  width: 22%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--scifi-cyan) 44%, var(--scifi-orange) 78%, transparent);
+  opacity: 0.66;
+  content: "";
+  animation: scifi-signal-sweep 7s ease-in-out infinite;
+}
+
+@keyframes scifi-signal-sweep {
+  0%, 100% { transform: translateX(110%); opacity: 0; }
+  18%, 82% { opacity: 0.66; }
+  50% { transform: translateX(-360%); opacity: 0.42; }
+}
+
+html body.studio-layout-v2[data-panel] :is(.workspace-title h1, .rail-brand strong) {
+  color: var(--scifi-text-strong) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+  text-shadow: 0 0 18px rgba(99, 217, 221, 0.08) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.workspace-badge, .ready-pill, .admin-console-topbar-badge, .feature-kicker, .admin-console-breadcrumb) {
+  border: 1px solid rgba(99, 217, 221, 0.30) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+  box-shadow: inset 0 0 14px rgba(99, 217, 221, 0.045) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.workspace-badge.wallet, .ready-pill) {
+  border-color: rgba(103, 211, 145, 0.30) !important;
+  color: var(--scifi-green) !important;
+  background: var(--scifi-green-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel] .studio-rail {
+  color: var(--scifi-text) !important;
+  background: rgba(7, 12, 15, 0.96) !important;
+  box-shadow: inset -1px 0 0 rgba(99, 217, 221, 0.045), var(--scifi-shadow) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.rail-logo, .rail-collapse) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: var(--scifi-panel-soft) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel] .rail-logo img {
+  filter: saturate(0.8) contrast(1.08) !important;
+}
+
+html body.studio-layout-v2[data-panel] .studio-rail .rail-action {
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease !important;
+}
+
+html body.studio-layout-v2[data-panel] .rail-action:hover {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text-strong) !important;
+  background: rgba(255, 255, 255, 0.035) !important;
+}
+
+html body.studio-layout-v2[data-panel] .studio-rail .rail-action:not(.rail-active):not(.active) {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] .studio-rail .rail-action:is(.rail-active, .active) {
+  border-color: rgba(99, 217, 221, 0.34) !important;
+  color: var(--scifi-text-strong) !important;
+  background: rgba(30, 113, 120, 0.24) !important;
+  box-shadow: inset 3px 0 0 var(--scifi-cyan), inset 0 0 24px rgba(99, 217, 221, 0.055) !important;
+}
+
+html body.studio-layout-v2[data-panel] .studio-rail .rail-action:is(.rail-active, .active) .rail-icon {
+  border-color: rgba(99, 217, 221, 0.30) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: rgba(99, 217, 221, 0.10) !important;
+}
+
+html body.studio-layout-v2[data-panel] .studio-rail .rail-action:is(.rail-active, .active) .rail-copy small {
+  color: var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel] .studio-rail .rail-action .rail-copy strong,
+html body.studio-layout-v2[data-panel] .studio-rail .rail-action .rail-copy small {
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+}
+
+html body.studio-layout-v2[data-panel] .rail-icon {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-muted) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.rail-wallet, .rail-account) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel] .rail-wallet strong {
+  color: var(--scifi-green) !important;
+}
+
+html body.studio-layout-v2[data-panel] .rail-wallet::before {
+  border-color: rgba(103, 211, 145, 0.28) !important;
+  color: var(--scifi-green) !important;
+  background: var(--scifi-green-soft) !important;
+}
+
+/* Shared controls */
+html body.studio-layout-v2[data-panel] :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-text) !important;
+  background: rgba(5, 9, 11, 0.78) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(input, textarea)::placeholder {
+  color: #687c82 !important;
+  opacity: 1 !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(input, textarea, select):focus {
+  border-color: var(--scifi-line-strong) !important;
+  box-shadow: 0 0 0 3px rgba(99, 217, 221, 0.09) !important;
+}
+
+html body.studio-layout-v2[data-panel] input[type="checkbox"],
+html body.studio-layout-v2[data-panel] input[type="radio"] {
+  accent-color: var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.primary-button, .generate-button, .community-card-primary, #createApiKeyBtn, #adminSaveBillingBtn, #adminSaveUpstreamBtn, #adminCreateRedeemBtn, #adminCreateUserBtn, #adminCreateCodeBtn) {
+  border: 1px solid rgba(99, 217, 221, 0.50) !important;
+  border-radius: 6px !important;
+  color: #efffff !important;
+  background: var(--scifi-cyan-deep) !important;
+  box-shadow: inset 0 1px 0 rgba(190, 255, 255, 0.14), 0 8px 22px rgba(18, 94, 101, 0.22) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.primary-button, .generate-button, .community-card-primary, #createApiKeyBtn):hover {
+  border-color: var(--scifi-cyan) !important;
+  background: #16727a !important;
+  transform: none !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.secondary-button, .secondary-link, .text-button, .icon-button, .canvas-entry-button, .account-pill, .collapse-history-button, .recharge-header-button, .upload-trigger, .history-trash, .history-close-button) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: rgba(255, 255, 255, 0.035) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.secondary-button, .secondary-link, .text-button, .icon-button, .canvas-entry-button, .account-pill, .collapse-history-button, .recharge-header-button, .upload-trigger, .history-trash, .history-close-button):hover {
+  border-color: var(--scifi-line-strong) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+  transform: none !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(button, input, select, textarea):disabled {
+  border-color: rgba(141, 161, 167, 0.10) !important;
+  color: #56666b !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
+  opacity: 0.72 !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.danger-button, [data-community-delete], .admin-upstream-card-actions button) {
+  border-color: rgba(255, 119, 109, 0.32) !important;
+  color: var(--scifi-red) !important;
+  background: var(--scifi-red-soft) !important;
+}
+
+/* Studio editor */
+html body.studio-layout-v2[data-panel="studio"] :is(.composer-card, .result-thread) {
+  border: 1px solid var(--scifi-line-strong) !important;
+  border-radius: var(--scifi-radius) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(10, 16, 20, 0.94) !important;
+  box-shadow: inset 0 1px 0 rgba(99, 217, 221, 0.14), 0 18px 46px rgba(0, 0, 0, 0.30) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .composer-card {
+  border-top-color: rgba(99, 217, 221, 0.64) !important;
+}
+
+/* Keep the desktop console balanced before the first task starts. */
+@media (min-width: 1181px) {
+  html body.studio-layout-v2[data-panel="studio"]:not(.infinite-canvas-open) .result-thread {
+    display: grid !important;
+  }
+}
+
+html body.studio-layout-v2[data-panel="studio"] .composer-card::after {
+  display: none !important;
+  background: none !important;
+  content: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .composer-toolbar {
+  border-color: var(--scifi-line) !important;
+  background: rgba(5, 10, 13, 0.62) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.select-pill, .select-pill-trigger) {
+  border-color: var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-soft) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .composer-card .select-pill,
+html body.studio-layout-v2[data-panel="studio"] .composer-card .select-pill > .select-pill-trigger {
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-soft) !important;
+  background-image: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].history-opened .composer-toolbar {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].history-opened .composer-toolbar .model-picker-row {
+  grid-column: 1 / -1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].history-opened .composer-toolbar .toolbar-spec-row {
+  grid-column: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .select-pill:is(:hover, .open) {
+  border-color: var(--scifi-line-strong) !important;
+  background: var(--scifi-panel-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .spec-label small {
+  color: var(--scifi-muted) !important;
+  font-family: "SFMono-Regular", Consolas, monospace !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .spec-label strong {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.mode-tabs, .composer-mode-tabs) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  background: rgba(4, 8, 10, 0.76) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.mode-tabs, .composer-mode-tabs) button {
+  border: 1px solid transparent !important;
+  border-radius: 5px !important;
+  color: var(--scifi-muted) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.mode-tabs, .composer-mode-tabs) button.active {
+  border-color: rgba(99, 217, 221, 0.38) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.pill-menu, #floatingMenuPortal > .pill-menu.floating-pill-menu) {
+  border: 1px solid var(--scifi-line-strong) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: rgba(8, 14, 17, 0.98) !important;
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.48) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+  backdrop-filter: blur(18px) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.pill-menu, #floatingMenuPortal > .pill-menu.floating-pill-menu) button {
+  border-radius: 5px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.pill-menu, #floatingMenuPortal > .pill-menu.floating-pill-menu) button:is(:hover, :focus-visible, .active) {
+  border-color: rgba(99, 217, 221, 0.24) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+  box-shadow: inset 2px 0 0 var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #prompt {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background-color: rgba(4, 8, 10, 0.82) !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.035) 1px, transparent 1px) !important;
+  background-size: 24px 24px !important;
+  box-shadow: inset 0 1px 8px rgba(0, 0, 0, 0.24) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #prompt:focus {
+  border-color: var(--scifi-line-strong) !important;
+  box-shadow: 0 0 0 3px rgba(99, 217, 221, 0.09), inset 0 1px 8px rgba(0, 0, 0, 0.24) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.upload-box.visible, .reference-preview.visible) {
+  border-color: rgba(99, 217, 221, 0.34) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: rgba(26, 70, 74, 0.10) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .upload-box.visible:hover {
+  border-color: var(--scifi-cyan) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .reference-preview.visible :is(.source-card, .source-card-single) {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .reference-preview.visible :is(.reference-head-copy strong, .source-card strong) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .reference-preview.visible :is(.reference-head-copy span, .source-card span) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .reference-preview.visible .source-thumb {
+  border-color: var(--scifi-line) !important;
+  background: var(--scifi-bg) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .generation-banner {
+  border: 1px solid rgba(99, 217, 221, 0.25) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+  box-shadow: inset 3px 0 0 var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.status, .composer-feedback-row, #promptCount, .preview-footer) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.status.error, .error-text),
+html body.studio-layout-v2[data-panel="studio"] .workspace-account :is(.error, [data-status="error"]) {
+  color: var(--scifi-red) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .intro-panel h2 {
+  color: var(--scifi-muted-strong) !important;
+  font-family: "SFMono-Regular", Consolas, monospace !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .intro-panel {
+  border: 1px solid var(--scifi-line) !important;
+  border-top-color: rgba(240, 162, 75, 0.42) !important;
+  border-radius: var(--scifi-radius) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(9, 14, 17, 0.92) !important;
+  background-image: none !important;
+  box-shadow: inset 0 1px 0 rgba(240, 162, 75, 0.08) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-card {
+  border-color: var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: rgba(11, 17, 21, 0.92) !important;
+  box-shadow: none !important;
+  transition: border-color 120ms ease, background-color 120ms ease !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-card:is(:hover, :focus-visible) {
+  border-color: var(--scifi-line-strong) !important;
+  background: var(--scifi-panel-strong) !important;
+  box-shadow: inset 0 -2px 0 rgba(240, 162, 75, 0.50) !important;
+  transform: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-cover {
+  border: 1px solid rgba(99, 217, 221, 0.12) !important;
+  background: #05090b !important;
+  background-image: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-cover img {
+  filter: brightness(1.08) saturate(1.04) contrast(1.03) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-card strong {
+  color: var(--scifi-muted-strong) !important;
+}
+
+/* Preview and generated results */
+html body.studio-layout-v2[data-panel="studio"] .thread-head {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .thread-head h2 {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .thread-head span {
+  border-color: rgba(99, 217, 221, 0.24) !important;
+  color: var(--scifi-cyan) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #previewMeta {
+  border: 1px solid rgba(99, 217, 221, 0.24) !important;
+  color: var(--scifi-cyan) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .preview {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background-color: #060b0e !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.065) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.065) 1px, transparent 1px) !important;
+  background-size: 36px 36px !important;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.28) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .preview::before {
+  border-color: rgba(99, 217, 221, 0.18) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.preview-empty h3, .generating-copy strong) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.preview-empty p, .generating-copy p) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .preview-empty img {
+  filter: saturate(0.5) brightness(0.72) contrast(1.12) !important;
+  opacity: 0.28 !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .centered-candidate-frame {
+  border-color: var(--scifi-line-strong) !important;
+  border-radius: 7px !important;
+  background: var(--scifi-panel-soft) !important;
+  box-shadow: inset 0 0 24px rgba(99, 217, 221, 0.05) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.result-card, .result-image-frame, .result-image-frame img) {
+  border-radius: 7px !important;
+  background: #05090b !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .result-card {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .result-meta {
+  min-height: 26px !important;
+  border: 1px solid rgba(99, 217, 221, 0.20) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: rgba(99, 217, 221, 0.065) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: var(--scifi-muted-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.result-actions a, .result-actions button, .result-more-menu > summary) {
+  border-color: var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: rgba(255, 255, 255, 0.035) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .result-actions :is(.result-action-primary, .result-action-publish) {
+  border-color: rgba(99, 217, 221, 0.34) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.result-more-popover, .result-publish-prompt) {
+  border-color: var(--scifi-line-strong) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: rgba(8, 14, 17, 0.98) !important;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.46) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .result-publish-prompt {
+  border-left-color: var(--scifi-orange) !important;
+  background: var(--scifi-orange-soft) !important;
+}
+
+/* History is a fixed-width sibling/column; visual rules do not alter geometry. */
+html body.studio-layout-v2[data-panel="studio"] .history-panel {
+  border-top-color: rgba(240, 162, 75, 0.52) !important;
+  background: rgba(8, 13, 16, 0.97) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .history-panel-head {
+  border-color: var(--scifi-line) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #historySection.history-panel .history-panel-head h2 {
+  color: var(--scifi-text-strong) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] #historySection.history-panel #historyHint {
+  border-color: rgba(240, 162, 75, 0.28) !important;
+  color: var(--scifi-orange) !important;
+  background: var(--scifi-orange-soft) !important;
+  -webkit-text-fill-color: var(--scifi-orange) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .new-chat-button {
+  border: 1px solid rgba(99, 217, 221, 0.42) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-text-strong) !important;
+  background: var(--scifi-cyan-deep) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.history-filters, #historyFilters) {
+  border-color: var(--scifi-line) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .history-search-box {
+  border-color: var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted) !important;
+  background: rgba(4, 8, 10, 0.76) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .history-search-box input {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .history-filter-row button {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-muted) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .history-filter-row button.active {
+  border-color: rgba(99, 217, 221, 0.34) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.history-item, .history-open-button) {
+  border-color: var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .history-item:hover {
+  border-color: var(--scifi-line-strong) !important;
+  background: var(--scifi-panel-strong) !important;
+  transform: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.history-empty-copy, .history-loading, .history-charge-text, .history-stat-line) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.history-quality-pill, .history-status-pill) {
+  border-color: rgba(99, 217, 221, 0.24) !important;
+  color: var(--scifi-cyan) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .history-resize {
+  border-color: rgba(99, 217, 221, 0.30) !important;
+  background: rgba(99, 217, 221, 0.08) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].history-opened::after,
+html body.studio-layout-v2[data-panel="studio"] #historyBackdrop.history-backdrop {
+  background: rgba(0, 3, 5, 0.64) !important;
+}
+
+/* Infinite canvas */
+html body.studio-layout-v2[data-panel="studio"] .infinite-canvas-panel {
+  border-color: var(--scifi-line-strong) !important;
+  border-radius: var(--scifi-radius) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel.infinite-canvas-panel {
+  border: 1px solid var(--scifi-line-strong) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  background-image: none !important;
+  box-shadow: inset 0 1px 0 rgba(99, 217, 221, 0.10) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel :is(#infiniteCanvasTitle, .canvas-head-copy h2) {
+  color: var(--scifi-text-strong) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel #canvasStatus {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel .canvas-search {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-muted) !important;
+  background: rgba(4, 8, 10, 0.84) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel .canvas-search input {
+  border: 0 !important;
+  color: var(--scifi-text) !important;
+  background: transparent !important;
+  -webkit-text-fill-color: var(--scifi-text) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel .canvas-search input::placeholder {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel .canvas-kind-filter {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  min-width: 196px !important;
+  border: 1px solid var(--scifi-line) !important;
+  background: var(--scifi-panel-soft) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel .canvas-kind-filter button {
+  border-color: transparent !important;
+  color: var(--scifi-muted-strong) !important;
+  background: transparent !important;
+  -webkit-text-fill-color: var(--scifi-muted-strong) !important;
+  white-space: nowrap !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel .canvas-kind-filter button.active {
+  border-color: rgba(99, 217, 221, 0.34) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+  -webkit-text-fill-color: var(--scifi-cyan-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"].infinite-canvas-open #infiniteCanvasPanel #canvasZoomLabel {
+  border: 1px solid rgba(240, 162, 75, 0.34) !important;
+  color: var(--scifi-orange) !important;
+  background: var(--scifi-orange-soft) !important;
+  -webkit-text-fill-color: var(--scifi-orange) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.infinite-canvas-head, .canvas-selection-bar) {
+  border-color: var(--scifi-line) !important;
+  background: var(--scifi-panel-solid) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] .infinite-canvas-viewport {
+  border-color: var(--scifi-line) !important;
+  background-color: #05090b !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.07) 1px, transparent 1px) !important;
+  background-size: 28px 28px !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.canvas-toolbar button, .canvas-kind-filter button) {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-muted-strong) !important;
+  background: var(--scifi-panel-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="studio"] :is(.canvas-toolbar button, .canvas-kind-filter button).active {
+  border-color: var(--scifi-line-strong) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+/* Shared feature routes */
+html body.studio-layout-v2:is([data-panel="prompts"], [data-panel="agent"], [data-panel="developers"], [data-panel="settings"], [data-panel="admin"]) {
+  color: var(--scifi-text) !important;
+  background-color: var(--scifi-bg) !important;
+  background-image:
+    linear-gradient(var(--scifi-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--scifi-grid) 1px, transparent 1px) !important;
+  background-size: 40px 40px !important;
+}
+
+html body.studio-layout-v2:is([data-panel="prompts"], [data-panel="agent"], [data-panel="developers"], [data-panel="settings"]) .feature-panel,
+html body.studio-layout-v2[data-panel="admin"] .admin-console-panel {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: var(--scifi-radius) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(9, 14, 17, 0.94) !important;
+  box-shadow: inset 0 1px 0 rgba(99, 217, 221, 0.12) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html body.studio-layout-v2:is([data-panel="prompts"], [data-panel="agent"], [data-panel="developers"], [data-panel="settings"]) .feature-head {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(8, 13, 16, 0.88) !important;
+}
+
+html body.studio-layout-v2:is([data-panel="prompts"], [data-panel="agent"], [data-panel="developers"], [data-panel="settings"]) .feature-head h2,
+html body.studio-layout-v2[data-panel="admin"] :is(.admin-console-sidebar-head h2, .admin-console-topbar h3) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2:is([data-panel="prompts"], [data-panel="agent"], [data-panel="developers"], [data-panel="settings"]) .feature-head p,
+html body.studio-layout-v2[data-panel="admin"] :is(.admin-console-sidebar-head p, .admin-console-topbar p) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.feature-kicker, .admin-console-breadcrumb) {
+  border-radius: 4px !important;
+  font-family: "SFMono-Regular", Consolas, monospace !important;
+  font-weight: 700 !important;
+}
+
+/* Community */
+html body.studio-layout-v2[data-panel="prompts"] .community-explainer {
+  border-color: var(--scifi-line) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] .community-explainer > div {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-muted) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] .community-explainer strong {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] .feature-search {
+  border-color: var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted) !important;
+  background: rgba(4, 8, 10, 0.76) !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] .feature-search input {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.library-tags, .library-filter-row) {
+  border-color: var(--scifi-line) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.library-tags, .library-filter-row) button {
+  border: 1px solid transparent !important;
+  color: var(--scifi-muted-strong) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.library-tags, .library-filter-row) button:is(.active, :hover) {
+  border-color: rgba(99, 217, 221, 0.30) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.community-card, .library-card, .creator-dashboard-summary, .creator-feedback-group, .creator-feedback-inbox) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.community-card, .library-card):hover {
+  border-color: var(--scifi-line-strong) !important;
+  box-shadow: inset 0 -2px 0 rgba(240, 162, 75, 0.48) !important;
+  transform: none !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.community-card h3, .library-card h3, .creator-dashboard-summary strong, .creator-feedback-group strong) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.community-card p, .library-card p, .community-heat-note, .creator-support-summary) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.community-card-actions button, .community-card-secondary-actions button, .community-filter-summary button, .community-load-more button) {
+  border-color: var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: rgba(255, 255, 255, 0.035) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] :is(.community-card-actions button[data-community-like], .community-card-actions button[data-community-download]) {
+  border-color: rgba(99, 217, 221, 0.42) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-deep) !important;
+}
+
+html body.studio-layout-v2[data-panel="prompts"] .feature-empty {
+  border: 1px dashed rgba(99, 217, 221, 0.30) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-muted) !important;
+  background-color: rgba(7, 12, 15, 0.70) !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.035) 1px, transparent 1px) !important;
+  background-size: 28px 28px !important;
+}
+
+/* API console */
+html body.studio-layout-v2[data-panel="developers"] :is(.api-docs-layout, .api-reference) {
+  color: var(--scifi-text) !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] :is(.api-key-panel, .api-doc-block) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] :is(.api-key-head strong, .api-doc-block h3, .api-schema-block dt) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] :is(.api-key-head span, .api-schema-block dd) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] .api-doc-block > span {
+  border-color: rgba(99, 217, 221, 0.25) !important;
+  color: var(--scifi-cyan) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] .api-doc-block pre {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: #c9f0ed !important;
+  background-color: #05090b !important;
+  background-image: linear-gradient(rgba(99, 217, 221, 0.04) 1px, transparent 1px) !important;
+  background-size: 100% 28px !important;
+  box-shadow: inset 3px 0 0 rgba(99, 217, 221, 0.34) !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] .api-doc-block code {
+  color: #c9f0ed !important;
+  font-family: "SFMono-Regular", Consolas, monospace !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] :is(.api-key-empty, .api-new-key) {
+  border-color: rgba(240, 162, 75, 0.30) !important;
+  color: var(--scifi-muted) !important;
+  background: var(--scifi-orange-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="developers"] .api-new-key code {
+  color: var(--scifi-orange) !important;
+}
+
+/* Agent */
+html body.studio-layout-v2[data-panel="agent"] .agent-main {
+  color: var(--scifi-text) !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] :is(.agent-sidebar, .agent-head, .agent-messages, .agent-composer, .agent-empty, .agent-conversation, .agent-selects select) {
+  border-color: var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-sidebar {
+  background: #080d10 !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-sidebar-head {
+  border-color: var(--scifi-line) !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] :is(.agent-sidebar-head strong, .agent-empty strong) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] :is(.agent-sidebar-head span, .agent-empty p) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-conversation:hover {
+  border-color: var(--scifi-line-strong) !important;
+  background: var(--scifi-panel-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-conversation.active {
+  border-color: rgba(99, 217, 221, 0.38) !important;
+  color: var(--scifi-text-strong) !important;
+  background: rgba(30, 113, 120, 0.24) !important;
+  box-shadow: inset 3px 0 0 var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-messages {
+  background-color: #060b0e !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.04) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-message {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-soft) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-message.user {
+  border-color: rgba(99, 217, 221, 0.34) !important;
+  color: var(--scifi-text-strong) !important;
+  background: rgba(18, 94, 101, 0.36) !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-composer textarea {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(4, 8, 10, 0.78) !important;
+}
+
+html body.studio-layout-v2[data-panel="agent"] .agent-conversation-meta button {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-muted) !important;
+  background: rgba(255, 255, 255, 0.035) !important;
+}
+
+/* Settings */
+html body.studio-layout-v2[data-panel="settings"] .settings-grid {
+  color: var(--scifi-text) !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] .settings-grid article {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] .settings-grid article:nth-child(2) {
+  border-top-color: rgba(103, 211, 145, 0.48) !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] .settings-grid article:nth-child(3) {
+  border-top-color: rgba(240, 162, 75, 0.48) !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] .settings-grid span {
+  color: var(--scifi-muted) !important;
+  font-family: "SFMono-Regular", Consolas, monospace !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] .settings-grid strong {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] .settings-grid p {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] #settingsBalance {
+  color: var(--scifi-green) !important;
+}
+
+html body.studio-layout-v2[data-panel="settings"] #settingsImageModel {
+  color: var(--scifi-orange) !important;
+}
+
+/* Admin console */
+html body.studio-layout-v2[data-panel="admin"] .admin-console-sidebar {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: #080d10 !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-main {
+  color: var(--scifi-text) !important;
+  background-color: #090e11 !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.026) 1px, transparent 1px) !important;
+  background-size: 40px 40px !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-nav button {
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-nav button:hover {
+  border-color: var(--scifi-line) !important;
+  background: rgba(255, 255, 255, 0.035) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-nav button.active {
+  border-color: rgba(99, 217, 221, 0.36) !important;
+  color: var(--scifi-text-strong) !important;
+  background: rgba(30, 113, 120, 0.24) !important;
+  box-shadow: inset 3px 0 0 var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-nav button small {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-nav button.active small {
+  color: var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] :is(.admin-console-topbar, .admin-surface, .admin-list-surface, .admin-overview-grid article, .admin-upstream-card, .admin-table-shell, .admin-inline-note) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 7px !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-topbar {
+  border-top-color: rgba(99, 217, 221, 0.52) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-overview-grid article:nth-child(2) {
+  border-top-color: rgba(240, 162, 75, 0.48) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-overview-grid article:nth-child(3) {
+  border-top-color: rgba(103, 211, 145, 0.48) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] :is(.admin-overview-grid article > span, .admin-surface-head span, .admin-table-meta, .admin-list-head span, .admin-activity-list span) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] :is(.admin-overview-grid article > strong, .admin-surface-head strong, .admin-list-head strong, .admin-activity-list strong) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] :is(.admin-shortcuts button, .admin-activity-list article, .admin-stack-list article) {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: rgba(255, 255, 255, 0.025) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-shortcuts button:hover {
+  border-color: var(--scifi-line-strong) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-inline-note {
+  border-left-color: var(--scifi-orange) !important;
+  color: var(--scifi-muted-strong) !important;
+  background: var(--scifi-orange-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] :is(.admin-toolbar, .admin-surface-head, .admin-list-head) {
+  border-color: var(--scifi-line) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-table {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-table :is(th, td) {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-muted-strong) !important;
+  background: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-table th {
+  color: var(--scifi-cyan) !important;
+  background: rgba(99, 217, 221, 0.055) !important;
+  font-family: "SFMono-Regular", Consolas, monospace !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-table tr:hover td {
+  background: rgba(99, 217, 221, 0.035) !important;
+}
+
+html body.studio-layout-v2[data-panel="admin"] .admin-console-status {
+  border: 1px solid rgba(103, 211, 145, 0.30) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-green) !important;
+  background: var(--scifi-green-soft) !important;
+}
+
+/* Dialogs retain all existing flows while matching the console. */
+html body.studio-layout-v2[data-panel] :is(.modal-backdrop, #authModal, #accountModal, #rechargeModal) {
+  background: rgba(1, 4, 6, 0.78) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.auth-dialog, .account-dialog, .recharge-dialog, .community-publish-dialog, .community-detail-dialog, .community-reuse-dialog, .community-tip-dialog, .selection-shell, .original-viewer-shell) {
+  border: 1px solid var(--scifi-line-strong) !important;
+  border-radius: var(--scifi-radius) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(9, 15, 18, 0.98) !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.60) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.login-campaign-hero, .login-campaign-body, .login-form-panel, .login-campaign-foot) {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background-color: var(--scifi-panel-solid) !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.04) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.auth-dialog h2, .account-dialog h2, .recharge-dialog h2, .community-publish-dialog h2, .community-detail-dialog h2, .community-reuse-dialog h2, .community-tip-dialog h2) {
+  color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.auth-dialog p, .account-dialog p, .recharge-dialog p, .community-publish-dialog p, .community-detail-dialog p, .community-reuse-dialog p, .community-tip-dialog p) {
+  color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] :is(.login-free-stamp, .login-hero-pill, .login-hero-ribbon, .login-hero-dashed) {
+  border-color: rgba(99, 217, 221, 0.28) !important;
+  color: var(--scifi-cyan-strong) !important;
+  background: var(--scifi-cyan-soft) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel] .login-paper-plane {
+  color: var(--scifi-orange) !important;
+}
+
+html body.studio-layout-v2[data-panel] .modal-close {
+  border: 1px solid var(--scifi-line) !important;
+  border-radius: 6px !important;
+  color: var(--scifi-muted-strong) !important;
+  background: var(--scifi-panel-soft) !important;
+}
+
+/* Login and registration use the same console material as the studio. */
+html body.studio-layout-v2[data-panel] #authModal .login-campaign-dialog {
+  border: 1px solid var(--scifi-line-strong) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  background-image: none !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.64) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-campaign-hero {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background-color: var(--scifi-panel-soft) !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.04) 1px, transparent 1px) !important;
+  background-size: 28px 28px !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-campaign-hero::before,
+html body.studio-layout-v2[data-panel] #authModal .login-campaign-hero::after {
+  display: none !important;
+  content: none !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-hero-pill,
+html body.studio-layout-v2[data-panel] #authModal .login-hero-pill::before {
+  color: var(--scifi-text-strong) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-hero-pill::before {
+  color: var(--scifi-cyan) !important;
+  -webkit-text-fill-color: var(--scifi-cyan) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal :is(.login-campaign-body, .login-form-panel, .login-campaign-foot) {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background-color: var(--scifi-panel-solid) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel {
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.035) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel :is(h2, label) {
+  color: var(--scifi-text-strong) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel :is(.eyebrow, #authIntro, .auth-status) {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel input {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(4, 8, 10, 0.88) !important;
+  background-image: none !important;
+  -webkit-text-fill-color: var(--scifi-text) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel input::placeholder {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel #registerBtn {
+  border-color: var(--scifi-line) !important;
+  color: var(--scifi-muted-strong) !important;
+  background: var(--scifi-panel-soft) !important;
+  -webkit-text-fill-color: var(--scifi-muted-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel #loginBtn,
+html body.studio-layout-v2[data-panel] #authModal.is-registering .login-form-panel #registerBtn {
+  border-color: rgba(99, 217, 221, 0.52) !important;
+  color: var(--scifi-text-strong) !important;
+  background: var(--scifi-cyan-deep) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-form-panel .auth-actions {
+  background: linear-gradient(transparent, var(--scifi-panel-solid) 32%) !important;
+  background-color: transparent !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-campaign-foot {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #authModal .login-campaign-close {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-muted-strong) !important;
+  background: var(--scifi-panel-soft) !important;
+  -webkit-text-fill-color: var(--scifi-muted-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .recharge-dialog {
+  border: 1px solid var(--scifi-line-strong) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.035) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.64) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .recharge-dialog :is(h2, .redeem-field) {
+  color: var(--scifi-text-strong) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .recharge-dialog :is(.eyebrow, #rechargeIntro, .purchase-helper, .recharge-note) {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .purchase-link {
+  border: 1px solid rgba(99, 217, 221, 0.50) !important;
+  color: var(--scifi-text-strong) !important;
+  background: var(--scifi-cyan-deep) !important;
+  background-image: none !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .recharge-plan {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-soft) !important;
+  background-image: none !important;
+  -webkit-text-fill-color: var(--scifi-text) !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .recharge-plan:is(:hover, .active) {
+  border-color: rgba(240, 162, 75, 0.52) !important;
+  background: var(--scifi-orange-soft) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .recharge-plan strong {
+  color: var(--scifi-orange) !important;
+  -webkit-text-fill-color: var(--scifi-orange) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal .recharge-plan span {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal #redeemCodeInput {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: rgba(4, 8, 10, 0.88) !important;
+  background-image: none !important;
+  -webkit-text-fill-color: var(--scifi-text) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal #redeemCodeInput::placeholder {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #rechargeModal #adminCreateCodeBtn {
+  border-color: rgba(240, 162, 75, 0.36) !important;
+  color: var(--scifi-orange) !important;
+  background: var(--scifi-orange-soft) !important;
+  -webkit-text-fill-color: var(--scifi-orange) !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal .account-dialog {
+  border: 1px solid var(--scifi-line-strong) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-solid) !important;
+  background-image:
+    linear-gradient(rgba(99, 217, 221, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.035) 1px, transparent 1px) !important;
+  background-size: 32px 32px !important;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.64) !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal .account-dialog h2 {
+  color: var(--scifi-text-strong) !important;
+  -webkit-text-fill-color: var(--scifi-text-strong) !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal .account-dialog :is(.eyebrow, #accountIntro) {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal .account-summary {
+  border: 1px solid var(--scifi-line) !important;
+  color: var(--scifi-text) !important;
+  background: var(--scifi-panel-soft) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal .account-summary span {
+  color: var(--scifi-muted) !important;
+  -webkit-text-fill-color: var(--scifi-muted) !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal .account-summary strong {
+  color: var(--scifi-green) !important;
+  -webkit-text-fill-color: var(--scifi-green) !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal #accountLogoutBtn {
+  border-color: rgba(255, 119, 109, 0.34) !important;
+  color: var(--scifi-red) !important;
+  background: var(--scifi-red-soft) !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  -webkit-text-fill-color: var(--scifi-red) !important;
+}
+
+html body.studio-layout-v2[data-panel] #accountModal #accountLogoutBtn:hover {
+  border-color: rgba(255, 119, 109, 0.58) !important;
+  background: rgba(255, 119, 109, 0.18) !important;
+}
+
+/* Responsive polish: retain the established route grids and drawer behavior. */
+@media (min-width: 1181px) {
+  html body.studio-layout-v2[data-panel="studio"].history-opened .studio-shell {
+    min-width: 0 !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"].history-opened :is(.history-panel, .workspace) {
+    min-width: 0 !important;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  html body.studio-layout-v2[data-panel] .studio-rail {
+    background: rgba(7, 12, 15, 0.98) !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .rail-nav {
+    scrollbar-color: rgba(99, 217, 221, 0.28) transparent !important;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 960px) {
+  html body.studio-layout-v2[data-panel="admin"] .admin-console-nav {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    overflow: visible !important;
+  }
+
+  html body.studio-layout-v2[data-panel="admin"] .admin-console-nav button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
+
+@media (max-width: 760px) {
+  html body.studio-layout-v2[data-panel] {
+    padding: 0 0 calc(76px + env(safe-area-inset-bottom)) !important;
+    background-size: 28px 28px !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-shell {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 100dvh !important;
+    padding: 8px !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail,
+  html body.studio-layout-v2[data-panel].rail-collapsed .studio-rail {
+    position: fixed !important;
+    inset: auto 8px max(8px, env(safe-area-inset-bottom)) 8px !important;
+    z-index: 70 !important;
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    height: 64px !important;
+    min-height: 64px !important;
+    padding: 5px !important;
+    overflow: hidden !important;
+    background: rgba(7, 12, 15, 0.98) !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail :is(.rail-top, .rail-bottom) {
+    display: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-nav,
+  html body.studio-layout-v2[data-panel].rail-collapsed .studio-rail .rail-nav {
+    display: grid !important;
+    grid-template-columns: none !important;
+    grid-template-rows: 54px !important;
+    grid-auto-flow: column !important;
+    grid-auto-columns: minmax(0, 1fr) !important;
+    align-items: stretch !important;
+    gap: 2px !important;
+    width: 100% !important;
+    height: 54px !important;
+    min-height: 54px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-action,
+  html body.studio-layout-v2[data-panel].rail-collapsed .studio-rail .rail-action {
+    display: grid !important;
+    grid-template-rows: 26px 14px !important;
+    place-items: center !important;
+    align-content: center !important;
+    gap: 2px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 54px !important;
+    min-height: 54px !important;
+    padding: 3px 1px !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-icon {
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-copy {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-copy strong {
+    display: block !important;
+    width: 100% !important;
+    overflow: hidden !important;
+    font-size: 9px !important;
+    line-height: 1.1 !important;
+    text-align: center !important;
+    text-overflow: clip !important;
+    white-space: nowrap !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-copy small {
+    display: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel] :is(.workspace, #adminConsolePanel.admin-console-panel) {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+
+  html body.studio-layout-v2[data-panel] :is(.studio-rail, .workspace, .history-panel, .composer-card, .result-thread, .feature-panel, .admin-console-panel) {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel] :is(.studio-rail, .workspace, .history-panel) {
+    border-radius: 8px !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-nav {
+    border: 1px solid var(--scifi-line) !important;
+    border-radius: 7px !important;
+    background: rgba(5, 10, 13, 0.88) !important;
+    box-shadow: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-action {
+    min-width: 0 !important;
+    border-radius: 6px !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .studio-rail .rail-action:is(.rail-active, .active) {
+    box-shadow: inset 0 -3px 0 var(--scifi-cyan) !important;
+  }
+
+  html body.studio-layout-v2[data-panel] .workspace-header {
+    background: rgba(8, 13, 16, 0.96) !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] :is(.composer-card, .result-thread) {
+    border-radius: 8px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .history-panel {
+    background: rgba(7, 12, 15, 0.99) !important;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.62) !important;
+  }
+
+  html body.studio-layout-v2[data-panel="admin"] .admin-table tr {
+    border: 1px solid var(--scifi-line) !important;
+    border-radius: 7px !important;
+    color: var(--scifi-text) !important;
+    background: var(--scifi-panel-solid) !important;
+    box-shadow: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel="admin"] .admin-table td {
+    border-color: var(--scifi-line) !important;
+  }
+
+  html body.studio-layout-v2[data-panel="admin"] .admin-table td::before {
+    color: var(--scifi-cyan) !important;
+  }
+}
+
+@media (max-width: 430px) {
+  html body.studio-layout-v2[data-panel] :is(.workspace-title, .workspace-account, .feature-head, .feature-head-actions, .api-doc-actions, .settings-actions) {
+    min-width: 0 !important;
+  }
+
+  html body.studio-layout-v2[data-panel] :is(button, a, strong, span, small, p, h1, h2, h3, dt, dd) {
+    overflow-wrap: anywhere;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-footer {
+    min-width: 0 !important;
+  }
+}
+
+@media (max-width: 760px) {
+  html body.studio-layout-v2[data-panel="prompts"] .feature-head > div:first-child > p,
+  html body.studio-layout-v2[data-panel="prompts"] .community-explainer,
+  html body.studio-layout-v2[data-panel="prompts"] .community-heat-note {
+    display: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel="prompts"] .feature-head-actions {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="prompts"] .feature-head-actions .feature-search {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel="prompts"] .community-sort-row {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 3px !important;
+    width: 100% !important;
+  }
+
+  html body.studio-layout-v2[data-panel="prompts"] .community-sort-row button {
+    min-width: 0 !important;
+    min-height: 38px !important;
+    padding: 5px 2px !important;
+    font-size: 11px !important;
+    line-height: 1.15 !important;
+    text-align: center !important;
+    white-space: normal !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .result-more-menu[open] {
+    z-index: 240 !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .result-more-popover {
+    top: calc(100% + 7px) !important;
+    bottom: auto !important;
+  }
+}
+
+@media (max-height: 600px) and (min-width: 761px) {
+  html body.studio-layout-v2[data-panel] .studio-shell {
+    min-height: 0 !important;
+  }
+
+  html body.studio-layout-v2[data-panel] :is(.rail-nav, .workspace-content, .admin-console-main) {
+    overscroll-behavior: contain !important;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 960px) and (max-height: 600px) {
+  html body.studio-layout-v2[data-panel="studio"] .workspace-content {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: 66px auto auto !important;
+    grid-template-areas:
+      "templates"
+      "controls"
+      "canvas" !important;
+    align-content: start !important;
+    gap: 8px !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 8px 14px 14px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .intro-panel {
+    grid-template-rows: 14px 48px !important;
+    gap: 4px !important;
+    height: 66px !important;
+    min-height: 66px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .intro-panel h2 {
+    margin: 0 !important;
+    font-size: 11px !important;
+    line-height: 14px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid.prompt-tools {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    overflow: hidden !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-card {
+    grid-template-columns: 40px minmax(0, 1fr) !important;
+    grid-template-rows: 40px !important;
+    align-items: center !important;
+    gap: 6px !important;
+    width: 100% !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    padding: 4px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-cover {
+    width: 40px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] #studioTemplateGrid .prompt-card strong {
+    display: -webkit-box !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-card {
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-resize {
+    display: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-toolbar {
+    grid-template-columns: minmax(180px, 1.15fr) repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: 50px !important;
+    gap: 6px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-toolbar :is(.model-picker-row, .toolbar-spec-row) {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    align-self: stretch !important;
+    height: 50px !important;
+    min-height: 50px !important;
+    gap: 6px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-toolbar .toolbar-spec-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-rows: 50px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-toolbar .toolbar-spec-row-primary {
+    grid-template-columns: minmax(136px, 1.35fr) minmax(78px, 0.65fr) !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-toolbar .toolbar-spec-row-primary .size-select {
+    grid-column: auto !important;
+    grid-row: auto !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-toolbar :is(.select-pill, .model-select) {
+    height: 50px !important;
+    min-height: 50px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-toolbar .select-pill > .select-pill-trigger {
+    min-height: 48px !important;
+    padding: 6px 8px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] #prompt {
+    min-height: 76px !important;
+    max-height: 76px !important;
+    padding: 10px !important;
+    resize: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-footer {
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 230px) !important;
+    grid-template-rows: 42px !important;
+    gap: 8px !important;
+    min-height: 42px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-left-tools {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-left-tools > button {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    min-height: 42px !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] .composer-feedback-row {
+    display: none !important;
+  }
+
+  html body.studio-layout-v2[data-panel="studio"] #generateBtn {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    width: 100% !important;
+    min-height: 42px !important;
+  }
+}
+
+@media (pointer: coarse), (max-width: 760px) {
+  html body.studio-layout-v2[data-panel] :is(button, .secondary-link, summary, input:not([type="checkbox"]):not([type="radio"]), select) {
+    min-height: 44px !important;
+  }
+
+  html body.studio-layout-v2[data-panel] :is(.rail-logo, .rail-collapse, .rail-icon, .icon-button, .history-close-button, .history-trash) {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html body.studio-layout-v2[data-panel],
+  html body.studio-layout-v2[data-panel] *,
+  html body.studio-layout-v2[data-panel] *::before,
+  html body.studio-layout-v2[data-panel] *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}

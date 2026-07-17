@@ -40,7 +40,8 @@ export function adminImageUpstreamsHtml(upstreams = []) {
       : (item.lastUsedAt ? `最近使用 ${formatDate(item.lastUsedAt)}` : '等待调度');
     const errorText = item.lastError ? `<small class="admin-upstream-error">最近错误：${escapeHtml(item.lastError)}</small>` : '';
     return `
-      <article class="admin-upstream-card" data-upstream-id="${escapeHtml(item.id || '')}">
+      <form class="admin-upstream-card" data-upstream-id="${escapeHtml(item.id || '')}" novalidate>
+        <input class="credential-username-sentinel" name="image-upstream-credential-${escapeHtml(item.id || String(index))}" autocomplete="username" value="youyu-image-upstream" tabindex="-1" aria-hidden="true" />
         <div class="admin-upstream-card-head">
           <label class="admin-upstream-toggle">
             <input type="checkbox" data-upstream-field="enabled" ${item.enabled !== false ? 'checked' : ''} />
@@ -57,8 +58,12 @@ export function adminImageUpstreamsHtml(upstreams = []) {
           <label>优先级<input data-upstream-field="priority" type="number" min="1" max="999" step="1" value="${escapeHtml(String(item.priority || (100 - index)))}" inputmode="numeric" /></label>
           <label>权重<input data-upstream-field="weight" type="number" min="1" max="100" step="1" value="${escapeHtml(String(item.weight || 1))}" inputmode="numeric" /></label>
           <label>Base URL<input data-upstream-field="upstreamBaseUrl" type="url" inputmode="url" value="${escapeHtml(item.upstreamBaseUrl || '')}" placeholder="https://image-upstream.example.com" autocomplete="off" /></label>
-          <label>API Key <small>${keyState}</small><input data-upstream-field="upstreamApiKey" type="password" placeholder="留空则不修改当前 Key" autocomplete="new-password" /></label>
-          <label>图像模型<input data-upstream-field="imageModel" type="text" value="${escapeHtml(item.imageModel || '')}" placeholder="gpt-image-2" autocomplete="off" /></label>
+          <label>API Key <small>${keyState}</small><input data-upstream-field="upstreamApiKey" name="upstream-api-key-${escapeHtml(item.id || String(index))}" type="password" placeholder="留空则不修改当前 Key" autocomplete="new-password" /></label>
+          <label class="admin-upstream-toggle admin-upstream-clear-key">
+            <input type="checkbox" data-upstream-field="clearUpstreamApiKey" ${item.upstreamApiKeyConfigured ? '' : 'disabled'} />
+            <span>清空当前 Key</span>
+          </label>
+          <label>默认模型 <small>保存后自动同步 /models</small><input data-upstream-field="imageModel" type="text" value="${escapeHtml(item.imageModel || '')}" placeholder="gpt-image-2" autocomplete="off" /></label>
         </div>
         <div class="admin-upstream-state">
           <span>${escapeHtml(stateText)}</span>
@@ -68,7 +73,7 @@ export function adminImageUpstreamsHtml(upstreams = []) {
         <div class="admin-upstream-card-actions">
           <button type="button" data-admin-remove-upstream="${escapeHtml(item.id || '')}" ${upstreams.length <= 1 ? 'disabled' : ''}>删除通道</button>
         </div>
-      </article>
+      </form>
     `;
   }).join('');
 }
@@ -127,20 +132,20 @@ export function adminGenerationLogsHtml({
           ].filter(Boolean).join(' · ');
           return `
             <tr>
-              <td>
+              <td data-label="用户 / 时间">
                 <div class="admin-log-user"><strong>${escapeHtml(item.username || '未知用户')}</strong><small>${escapeHtml(item.account || item.userId || '')}</small><small>${escapeHtml(formatDate(item.createdAt))}</small>${historyDeletedText}</div>
               </td>
-              <td>
+              <td data-label="任务">
                 <div class="admin-log-task"><strong>${escapeHtml(generationModeText(item.mode))} · ${escapeHtml(qualityLabel(item.quality))}</strong><small>${escapeHtml(sourceText(item.source))} · ${escapeHtml(item.size || '-')} · ${escapeHtml(String(item.returnedCount || item.imageCount || 0))}/${escapeHtml(String(item.requestedCount || item.count || 1))} 张</small></div>
               </td>
-              <td>
+              <td data-label="扣费">
                 <div class="admin-log-money"><strong>${yuan(item.consumeAmountCents || item.priceCents || 0)}${refundText}</strong><small>${escapeHtml(billingStateText(item.billingState))}${partialRefundText}${Number.isFinite(Number(item.balanceAfterCents)) ? ` · 余 ${yuan(item.balanceAfterCents)}` : ''}</small></div>
               </td>
-              <td><span class="admin-status-pill ${statusClass}">${escapeHtml(generationStatusText(item.status))}</span></td>
-              <td>
+              <td data-label="状态"><span class="admin-status-pill ${statusClass}">${escapeHtml(generationStatusText(item.status))}</span></td>
+              <td data-label="通道 / 耗时">
                 <div class="admin-log-upstream"><strong>${escapeHtml(item.upstreamName || item.upstreamModel || item.model || '-')}</strong><small>${escapeHtml(durationText(item.durationMs))}</small></div>
               </td>
-              <td>
+              <td data-label="提示词 / 错误">
                 <div class="admin-log-prompt">
                   ${promptText}
                   <details class="admin-log-detail">
@@ -199,13 +204,13 @@ export function adminRedeemCodesHtml({
             : `<button type="button" disabled>${redeemStatusText(item.status)}</button>`;
           return `
             <tr>
-              <td>${canSelect ? `<input type="checkbox" data-admin-redeem-select="${escapeHtml(item.id)}" ${checked} />` : '-'}</td>
-              <td><code>${escapeHtml(item.code)}</code></td>
-              <td>${yuan(item.amountCents)}</td>
-              <td><span class="admin-status-pill ${escapeHtml(redeemStatusForClass(item.status))}">${escapeHtml(redeemStatusText(item.status))}</span></td>
-              <td>${escapeHtml(item.usedByName || item.usedByAccount || '-')}</td>
-              <td>${escapeHtml(formatDate(item.usedAt || item.revokedAt || item.createdAt))}</td>
-              <td>${action}</td>
+              <td data-label="选择">${canSelect ? `<input type="checkbox" data-admin-redeem-select="${escapeHtml(item.id)}" ${checked} />` : '-'}</td>
+              <td data-label="卡密"><code>${escapeHtml(item.code)}</code></td>
+              <td data-label="金额">${yuan(item.amountCents)}</td>
+              <td data-label="状态"><span class="admin-status-pill ${escapeHtml(redeemStatusForClass(item.status))}">${escapeHtml(redeemStatusText(item.status))}</span></td>
+              <td data-label="使用用户">${escapeHtml(item.usedByName || item.usedByAccount || '-')}</td>
+              <td data-label="时间">${escapeHtml(formatDate(item.usedAt || item.revokedAt || item.createdAt))}</td>
+              <td data-label="操作">${action}</td>
             </tr>
           `;
         }).join('')}
@@ -239,17 +244,18 @@ export function adminUsersHtml({ users = [], search = '' } = {}) {
       <tbody>
         ${managedUsers.map((user) => {
           const isDeleted = user.status === 'deleted';
+          const userLabel = escapeHtml(user.username || user.account || '该用户');
           const statusButton = user.status === 'active'
-            ? `<button type="button" data-admin-user-status="${escapeHtml(user.id)}" data-next-status="disabled">禁用</button>`
-            : `<button type="button" data-admin-user-status="${escapeHtml(user.id)}" data-next-status="active" ${isDeleted ? 'disabled' : ''}>启用</button>`;
+            ? `<button type="button" data-admin-user-status="${escapeHtml(user.id)}" data-user-label="${userLabel}" data-next-status="disabled">禁用</button>`
+            : `<button type="button" data-admin-user-status="${escapeHtml(user.id)}" data-user-label="${userLabel}" data-next-status="active" ${isDeleted ? 'disabled' : ''}>启用</button>`;
           return `
             <tr class="${isDeleted ? 'muted' : ''}">
-              <td>${escapeHtml(user.username || user.account)}</td>
-              <td><code>${escapeHtml(user.account || user.username)}</code></td>
-              <td>${yuan(user.balanceCents)}</td>
-              <td><span class="admin-status-pill ${escapeHtml(user.status)}">${escapeHtml(userStatusText(user.status))}</span></td>
-              <td>${escapeHtml(formatDate(user.createdAt))}</td>
-              <td>
+              <td data-label="用户">${escapeHtml(user.username || user.account)}</td>
+              <td data-label="账号"><code>${escapeHtml(user.account || user.username)}</code></td>
+              <td data-label="余额">${yuan(user.balanceCents)}</td>
+              <td data-label="状态"><span class="admin-status-pill ${escapeHtml(user.status)}">${escapeHtml(userStatusText(user.status))}</span></td>
+              <td data-label="创建时间">${escapeHtml(formatDate(user.createdAt))}</td>
+              <td data-label="操作">
                 <div class="admin-row-actions">
                   <button type="button" data-admin-reset-password="${escapeHtml(user.id)}" ${isDeleted ? 'disabled' : ''}>重置密码</button>
                   ${statusButton}

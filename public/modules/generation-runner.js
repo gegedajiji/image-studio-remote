@@ -18,6 +18,7 @@ export function buildGenerationPayload({ prompt, imageDataUrls, storyboardPrompt
     prompt,
     quality: state.quality,
     size: state.size,
+    model: state.imageModel,
     outputFormat: state.outputFormat,
     count: state.count,
     layout: state.layout,
@@ -63,9 +64,31 @@ export async function submitGenerationRequest(payload, { mode = state.mode } = {
 export async function pollGenerationResult(generationId, submitSeq) {
   const startedAt = Date.now();
   let intervalMs = 1200;
+  let transientFailures = 0;
+  const maxTransientFailures = 8;
   while (Date.now() - startedAt < 45 * 60 * 1000) {
     await sleep(intervalMs);
-    const data = await api(`/api/generate/${encodeURIComponent(generationId)}`);
+    let data;
+    try {
+      data = await api(`/api/generate/${encodeURIComponent(generationId)}`);
+      transientFailures = 0;
+    } catch (error) {
+      if (error.status === 401) throw error;
+      const transient = [0, 502, 503, 504].includes(Number(error.status || 0));
+      if (!transient) throw error;
+      transientFailures += 1;
+      callbacks.setStatus(`任务仍在后台生成，状态读取暂时中断，正在第 ${transientFailures} 次重试。`);
+      callbacks.setPreviewMeta('生成中 · 状态同步重试');
+      if (transientFailures > maxTransientFailures) {
+        const pendingError = new Error('暂时无法读取生成状态，任务仍会在后台继续；请从历史记录查看最终结果，失败会自动退款。');
+        pendingError.status = error.status || 0;
+        pendingError.generationStillPending = true;
+        pendingError.generationId = generationId;
+        throw pendingError;
+      }
+      intervalMs = Math.min(7000, Math.round(intervalMs * 1.25));
+      continue;
+    }
     const item = data.generation;
     if (!item || !callbacks.isCurrentSubmitSeq(submitSeq)) return data;
     if (item.status === 'succeeded' || item.status === 'failed') return data;
@@ -75,7 +98,10 @@ export async function pollGenerationResult(generationId, submitSeq) {
     callbacks.setPreviewMeta(activeQueueCount > 0 ? `生成中 · 队列运行 ${activeQueueCount}` : '生成中 · 后台任务运行中');
     intervalMs = Math.min(5000, Math.round(intervalMs * 1.2));
   }
-  throw new Error('生成任务等待超时，请到历史记录查看最终状态；失败会自动退款。');
+  const timeoutError = new Error('生成任务等待时间较长，任务仍会在后台继续；请到历史记录查看最终状态，失败会自动退款。');
+  timeoutError.generationStillPending = true;
+  timeoutError.generationId = generationId;
+  throw timeoutError;
 }
 
 export function createLongGenerationTimers(submitSeq) {

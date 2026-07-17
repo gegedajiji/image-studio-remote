@@ -18,6 +18,11 @@ export function finishGenerationActivity(submitSeq) {
   }
 }
 
+export function cancelGenerationActivity() {
+  activeGenerationSeq += 1;
+  document.body.classList.remove('generating-active');
+}
+
 export function isGenerateButtonLocked() {
   return $('generateBtn')?.dataset.submitLocked === 'true';
 }

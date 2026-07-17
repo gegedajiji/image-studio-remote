@@ -494,8 +494,8 @@ function cleanOptionalBaseUrl(value) {
 function cleanModelName(value, fallback) {
   const model = String(value || fallback || '').trim();
   if (!model) throw new Error('模型名称不能为空');
-  if (model.length > 80 || !/^[a-zA-Z0-9._:-]+$/.test(model)) {
-    throw new Error('模型名称只能包含字母、数字、点、下划线、冒号和短横线');
+  if (model.length > 120 || !/^[a-zA-Z0-9._:/@-]+$/.test(model)) {
+    throw new Error('模型名称只能包含字母、数字、点、斜杠、下划线、冒号、@ 和短横线');
   }
   return model;
 }
@@ -544,7 +544,10 @@ function normalizeImageUpstream(input, index, { existing = null, legacyPriorityM
 
   const hasApiKeyField = Object.prototype.hasOwnProperty.call(source, 'upstreamApiKey');
   const incomingApiKey = hasApiKeyField ? String(source.upstreamApiKey || '').trim() : '';
-  const upstreamApiKey = incomingApiKey || existing?.upstreamApiKey || String(source.upstreamApiKey || '').trim();
+  const clearApiKey = cleanUpstreamEnabled(source.clearUpstreamApiKey, false);
+  const upstreamApiKey = clearApiKey
+    ? incomingApiKey
+    : (incomingApiKey || existing?.upstreamApiKey || String(source.upstreamApiKey || '').trim());
   if (upstreamApiKey.length > 300) throw new Error('生图 API Key 长度异常');
 
   const upstreamBaseUrl = Object.prototype.hasOwnProperty.call(source, 'upstreamBaseUrl')
@@ -648,6 +651,7 @@ function normalizeAiSettings() {
   const current = db.aiSettings && typeof db.aiSettings === 'object' ? db.aiSettings : {};
   const imageUpstreams = normalizeImageUpstreams(current);
   const primary = primaryImageUpstream(imageUpstreams);
+  const hasTextApiKey = Object.prototype.hasOwnProperty.call(current, 'textUpstreamApiKey');
   db.aiSettings = {
     imageUpstreams,
     dispatchVersion: 2,
@@ -655,7 +659,9 @@ function normalizeAiSettings() {
     upstreamApiKey: primary.upstreamApiKey || '',
     imageModel: primary.imageModel || cleanModelName('', config.imageModel),
     textUpstreamBaseUrl: cleanBaseUrl(current.textUpstreamBaseUrl || primary.upstreamBaseUrl || config.textUpstreamBaseUrl || config.upstreamBaseUrl),
-    textUpstreamApiKey: String(current.textUpstreamApiKey || primary.upstreamApiKey || config.textUpstreamApiKey || config.upstreamApiKey || '').trim(),
+    textUpstreamApiKey: hasTextApiKey
+      ? String(current.textUpstreamApiKey || '').trim()
+      : String(primary.upstreamApiKey || config.textUpstreamApiKey || config.upstreamApiKey || '').trim(),
     textModel: cleanModelName(current.textModel, config.textModel),
     updatedAt: Number(current.updatedAt || Date.now()),
     updatedBy: current.updatedBy || null
@@ -748,9 +754,11 @@ export async function updateAiSettings({ settings, operatorId }) {
     upstreamApiKey: primary.upstreamApiKey,
     imageModel: primary.imageModel,
     textUpstreamBaseUrl: cleanBaseUrl(settings?.textUpstreamBaseUrl, db.aiSettings.textUpstreamBaseUrl || primary.upstreamBaseUrl),
-    textUpstreamApiKey: hasTextApiKeyField && String(settings?.textUpstreamApiKey || '').trim()
-      ? String(settings.textUpstreamApiKey).trim()
-      : db.aiSettings.textUpstreamApiKey,
+    textUpstreamApiKey: cleanUpstreamEnabled(settings?.clearTextUpstreamApiKey, false)
+      ? String(settings?.textUpstreamApiKey || '').trim()
+      : (hasTextApiKeyField && String(settings?.textUpstreamApiKey || '').trim()
+        ? String(settings.textUpstreamApiKey).trim()
+        : db.aiSettings.textUpstreamApiKey),
     textModel: cleanModelName(settings?.textModel, db.aiSettings.textModel),
     updatedAt: Date.now(),
     updatedBy: operatorId || null
@@ -796,6 +804,7 @@ function normalizeBillingSettings() {
       '1k': config.prices['1k'],
       '2k': config.prices['2k']
     },
+    purchaseCodeUrl: config.purchaseCodeUrl || '',
     updatedAt: Date.now(),
     updatedBy: null
   };
@@ -809,9 +818,37 @@ function normalizeBillingSettings() {
       '1k': Number.isInteger(price1k) && price1k > 0 ? price1k : defaults.prices['1k'],
       '2k': Number.isInteger(price2k) && price2k > 0 ? price2k : defaults.prices['2k']
     },
+    purchaseCodeUrl: Object.prototype.hasOwnProperty.call(current, 'purchaseCodeUrl')
+      ? normalizePurchaseCodeUrl(current.purchaseCodeUrl, '')
+      : defaults.purchaseCodeUrl,
     updatedAt: Number(current.updatedAt || defaults.updatedAt),
     updatedBy: current.updatedBy || null
   };
+}
+
+function normalizePurchaseCodeUrl(value, fallback = '') {
+  const text = String(value || '').trim();
+  if (!text) return String(fallback || '').trim();
+  try {
+    const url = new URL(text);
+    if (!['http:', 'https:'].includes(url.protocol)) return String(fallback || '').trim();
+    return url.toString();
+  } catch {
+    return String(fallback || '').trim();
+  }
+}
+
+function assertPurchaseCodeUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(text);
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error('购买链接必须是 http 或 https 地址');
+    return url.toString();
+  } catch (error) {
+    if (error.message.includes('购买链接')) throw error;
+    throw new Error('购买链接格式不正确');
+  }
 }
 
 export function billingSettings() {
@@ -823,15 +860,21 @@ export function billingPrices() {
   return billingSettings().prices;
 }
 
-export async function updateBillingPrices({ prices, operatorId }) {
+export async function updateBillingPrices({ prices, purchaseCodeUrl, operatorId }) {
   const price1k = Math.trunc(Number(prices?.['1k']));
   const price2k = Math.trunc(Number(prices?.['2k']));
   if (!Number.isInteger(price1k) || price1k <= 0) throw new Error('标准质量价格必须是大于 0 的整数分');
   if (!Number.isInteger(price2k) || price2k <= 0) throw new Error('高质量价格必须是大于 0 的整数分');
   if (price1k > 100000 || price2k > 100000) throw new Error('单张价格不能超过 1000 奇点');
   const now = Date.now();
+  const current = billingSettings();
+  const nextPurchaseCodeUrl = Object.prototype.hasOwnProperty.call(arguments[0] || {}, 'purchaseCodeUrl')
+    ? assertPurchaseCodeUrl(purchaseCodeUrl)
+    : current.purchaseCodeUrl;
   db.billingSettings = {
+    ...current,
     prices: { '1k': price1k, '2k': price2k },
+    purchaseCodeUrl: nextPurchaseCodeUrl,
     updatedAt: now,
     updatedBy: operatorId || null
   };
@@ -965,9 +1008,30 @@ function replaceById(collection, item) {
   return item;
 }
 
+function shouldReplaceGenerationFromDurable(current, incoming) {
+  if (!incoming?.id) return false;
+  if (!current) return true;
+
+  const currentUpdatedAt = Number(current.updatedAt || 0);
+  const incomingUpdatedAt = Number(incoming.updatedAt || 0);
+  if (incomingUpdatedAt && currentUpdatedAt && incomingUpdatedAt < currentUpdatedAt) return false;
+
+  const currentFinished = current.status === 'failed' || current.status === 'succeeded';
+  const incomingPending = incoming.status === 'pending';
+  if (currentFinished && incomingPending) return false;
+
+  const currentFinishedAt = Number(current.finishedAt || 0);
+  const incomingFinishedAt = Number(incoming.finishedAt || 0);
+  if (currentFinishedAt && !incomingFinishedAt) return false;
+
+  return true;
+}
+
 export function refreshGenerationFromDurableStore(id) {
   const generation = readSqliteObject('generations', id);
   if (!generation) return findGenerationById(id);
+  const current = findGenerationById(id);
+  if (!shouldReplaceGenerationFromDurable(current, generation)) return current;
   const refreshed = replaceById('generations', generation);
   if (generation.userId) {
     const user = readSqliteObject('users', generation.userId);
@@ -1590,6 +1654,28 @@ export function generationBillingSummary(generationId, userId = null) {
   };
 }
 
+function positiveInteger(value) {
+  const amount = Math.trunc(Number(value || 0));
+  return Number.isInteger(amount) && amount > 0 ? amount : 0;
+}
+
+function generationRefundTargetCents(generation, billing) {
+  const metadata = generation?.metadata || {};
+  const consumedAmountCents = positiveInteger(billing?.consumedAmountCents);
+  const explicitRefund = positiveInteger(metadata.refundRequestedCents);
+  const partialRefund = positiveInteger(metadata.partialRefundRequestedCents);
+  if (generation?.status === 'succeeded' && partialRefund > 0) {
+    return Math.min(consumedAmountCents, partialRefund);
+  }
+  if (explicitRefund > 0) {
+    return Math.min(consumedAmountCents, explicitRefund);
+  }
+  if (partialRefund > 0 && metadata.partialRefundError) {
+    return Math.min(consumedAmountCents, partialRefund);
+  }
+  return consumedAmountCents;
+}
+
 export async function expireStalePendingGenerations({
   maxAgeMs = 1000 * 60 * 35,
   modeMaxAgeMs = null,
@@ -1638,6 +1724,67 @@ export async function expireStalePendingGenerations({
   });
   if (expired.length) await persist();
   return expired;
+}
+
+export async function failPendingGenerationsForUser({
+  userId,
+  reason = '账号已被管理员停用，未完成的生图任务已取消并退款',
+  operatorId = null
+} = {}) {
+  const scopedUserId = String(userId || '');
+  if (!scopedUserId) throw new Error('用户不存在');
+  const now = Date.now();
+  const cancelled = [];
+  db.generations.forEach((generation) => {
+    if (generation.userId !== scopedUserId || generation.status !== 'pending') return;
+    const consume = db.transactions.find((tx) => tx.type === 'consume' && tx.generationId === generation.id && tx.userId === generation.userId);
+    const amount = Math.abs(Number(consume?.amountCents || generation.priceCents || 0));
+    let refund = null;
+    let refundError = null;
+    if (consume && amount > 0) {
+      try {
+        refund = applyRefund({
+          userId: generation.userId,
+          amountCents: amount,
+          reason,
+          generationId: generation.id,
+          now
+        });
+      } catch (error) {
+        refundError = error;
+      }
+    }
+    const startedAt = Number(generation.startedAt || generation.createdAt || now);
+    const requestedCount = Math.max(1, Math.trunc(Number(generation.count || 1)) || 1);
+    generation.status = 'failed';
+    generation.error = reason;
+    generation.finishedAt = now;
+    generation.durationMs = Math.max(0, now - startedAt);
+    generation.metadata = {
+      ...(generation.metadata || {}),
+      requestedCount,
+      returnedCount: 0,
+      failedCount: requestedCount,
+      adminCancelled: true,
+      adminCancelReason: reason,
+      adminCancelOperatorId: operatorId || null,
+      adminCancelledAt: now,
+      refundCents: Math.abs(Number(refund?.amountCents || 0)),
+      refundTransactionId: refund?.id || null,
+      refundPending: Boolean(refundError),
+      refundLastError: refundError ? String(refundError.message || refundError).slice(0, 300) : null,
+      refundLastAttemptAt: now
+    };
+    generation.updatedAt = now;
+    cancelled.push({
+      id: generation.id,
+      userId: generation.userId,
+      amountCents: Math.abs(Number(refund?.amountCents || 0)),
+      refundError: refundError?.message || null
+    });
+  });
+  if (cancelled.length) await persist();
+  return cancelled;
 }
 
 export async function createChargedGeneration({ userId, amountCents, reason, generation }) {
@@ -1704,6 +1851,148 @@ export async function updateGeneration(id, patch) {
   Object.assign(generation, patch, { updatedAt: Date.now() });
   await persist();
   return generation;
+}
+
+export async function updateGenerationIfPending(id, patch) {
+  const generation = db.generations.find((item) => item.id === id);
+  if (!generation) throw new Error('记录不存在');
+  if (generation.status !== 'pending') {
+    return { generation, updated: false };
+  }
+  Object.assign(generation, patch, { updatedAt: Date.now() });
+  await persist();
+  return { generation, updated: true };
+}
+
+export async function finishGenerationIfPending(id, patchOrBuilder, { refund = null } = {}) {
+  const generation = db.generations.find((item) => item.id === id);
+  if (!generation) throw new Error('记录不存在');
+  if (generation.status !== 'pending') {
+    return {
+      generation,
+      updated: false,
+      refundTransaction: null,
+      refundActualCents: 0,
+      refundError: null
+    };
+  }
+  const now = Date.now();
+  let refundTransaction = null;
+  let refundActualCents = 0;
+  let refundError = null;
+  const amountCents = Number(refund?.amountCents || 0);
+  if (Number.isInteger(amountCents) && amountCents > 0) {
+    try {
+      const refundUserId = refund.userId || generation.userId;
+      const beforeRefund = generationBillingSummary(generation.id, refundUserId);
+      refundTransaction = applyRefund({
+        userId: refundUserId,
+        amountCents,
+        reason: refund.reason || '生成任务自动退款',
+        generationId: generation.id,
+        now
+      });
+      const afterRefund = generationBillingSummary(generation.id, refundUserId);
+      refundActualCents = Math.max(0, afterRefund.refundedAmountCents - beforeRefund.refundedAmountCents);
+    } catch (error) {
+      refundError = error;
+    }
+  }
+  const patch = (typeof patchOrBuilder === 'function'
+    ? patchOrBuilder({ generation, now, refundTransaction, refundActualCents, refundError })
+    : patchOrBuilder) || {};
+  if (refundError && amountCents > 0) {
+    patch.metadata = {
+      ...(patch.metadata || generation.metadata || {}),
+      refundPending: true,
+      refundRequestedCents: amountCents,
+      refundLastError: String(refundError.message || refundError).slice(0, 300),
+      refundLastAttemptAt: now,
+      refundRetryCount: Number(generation.metadata?.refundRetryCount || 0) + 1
+    };
+  } else if (refundTransaction && refundActualCents > 0) {
+    patch.metadata = {
+      ...(patch.metadata || generation.metadata || {}),
+      refundPending: false,
+      refundLastError: null,
+      refundLastAttemptAt: now
+    };
+  }
+  Object.assign(generation, patch || {}, { updatedAt: now });
+  await persist();
+  return {
+    generation,
+    updated: true,
+    refundTransaction,
+    refundActualCents,
+    refundError
+  };
+}
+
+export async function retryPendingGenerationRefunds({ limit = 20, reason = '生成任务退款补偿' } = {}) {
+  const now = Date.now();
+  const max = Math.max(1, Math.min(100, Math.trunc(Number(limit || 20)) || 20));
+  const candidates = db.generations
+    .filter((generation) => {
+      if (!generation || generation.status === 'pending') return false;
+      const metadata = generation.metadata || {};
+      return Boolean(metadata.refundPending || metadata.refundError || metadata.partialRefundError || metadata.refundLastError);
+    })
+    .slice(0, max);
+  const results = [];
+  for (const generation of candidates) {
+    const billing = generationBillingSummary(generation.id, generation.userId);
+    const remainingAmountCents = Math.max(0, Number(billing.remainingAmountCents || 0));
+    const metadata = generation.metadata || {};
+    const targetRefundCents = generationRefundTargetCents(generation, billing);
+    const amountToRefundCents = Math.min(
+      remainingAmountCents,
+      Math.max(0, targetRefundCents - Math.max(0, Number(billing.refundedAmountCents || 0)))
+    );
+    if (remainingAmountCents <= 0 || amountToRefundCents <= 0) {
+      generation.metadata = {
+        ...metadata,
+        refundPending: false,
+        refundLastError: null,
+        refundClearedAt: now
+      };
+      generation.updatedAt = now;
+      results.push({ id: generation.id, status: 'cleared', amountCents: 0 });
+      continue;
+    }
+    try {
+      const tx = applyRefund({
+        userId: generation.userId,
+        amountCents: amountToRefundCents,
+        reason,
+        generationId: generation.id,
+        now
+      });
+      generation.metadata = {
+        ...metadata,
+        refundPending: false,
+        refundLastError: null,
+        refundRetryCount: Number(metadata.refundRetryCount || 0) + 1,
+        refundRecoveredAt: now,
+        refundRecoveryTransactionId: tx?.id || null,
+        refundRecoveredCents: Math.abs(Number(tx?.amountCents || amountToRefundCents))
+      };
+      generation.updatedAt = now;
+      results.push({ id: generation.id, status: 'refunded', amountCents: Math.abs(Number(tx?.amountCents || amountToRefundCents)) });
+    } catch (error) {
+      generation.metadata = {
+        ...metadata,
+        refundPending: true,
+        refundLastError: String(error.message || error).slice(0, 300),
+        refundLastAttemptAt: now,
+        refundRetryCount: Number(metadata.refundRetryCount || 0) + 1
+      };
+      generation.updatedAt = now;
+      results.push({ id: generation.id, status: 'failed', amountCents: amountToRefundCents, error: error.message || String(error) });
+    }
+  }
+  if (results.length) await persist();
+  return results;
 }
 
 export async function attachTransactionToGeneration(transactionId, generationId) {
@@ -1825,7 +2114,7 @@ function clearCommunityPinnedComment(post, now = Date.now()) {
   return true;
 }
 
-export async function createCommunityPost({ userId, generationId, imageIndex = 0, imageIndexes = null, title, description, tags }) {
+export async function createCommunityPost({ userId, generationId, imageIndex = 0, imageIndexes = null, title, description, tags, showSourceImages = false }) {
   const user = findUserById(userId);
   if (!user) throw new Error('用户不存在');
   const generation = findGenerationById(generationId);
@@ -1862,6 +2151,7 @@ export async function createCommunityPost({ userId, generationId, imageIndex = 0
     prompt: String(generation.prompt || '').slice(0, 4000),
     tags: normalizeTags(tags),
     sourcePostId: sourcePost && sourcePost.id !== postId ? sourcePost.id : null,
+    showSourceImages: Boolean(showSourceImages && generation.mode === 'edit' && Array.isArray(generation.sourceImages) && generation.sourceImages.length),
     downloadMode: 'free',
     tipCents: 0,
     likeCount: 0,
@@ -1879,7 +2169,7 @@ export async function createCommunityPost({ userId, generationId, imageIndex = 0
   return post;
 }
 
-export async function updateCommunityPost({ postId, userId, title, description, tags }) {
+export async function updateCommunityPost({ postId, userId, title, description, tags, showSourceImages = undefined }) {
   const post = db.communityPosts.find((item) => item.id === postId && item.status === 'published');
   if (!post) throw new Error('作品不存在');
   const user = findUserById(userId);
@@ -1891,6 +2181,10 @@ export async function updateCommunityPost({ postId, userId, title, description, 
   post.title = cleanTitle;
   post.description = String(description || '').trim().slice(0, 300);
   post.tags = normalizeTags(tags);
+  if (showSourceImages !== undefined) {
+    const generation = findGenerationById(post.generationId);
+    post.showSourceImages = Boolean(showSourceImages && generation?.mode === 'edit' && Array.isArray(generation.sourceImages) && generation.sourceImages.length);
+  }
   post.updatedAt = Date.now();
   refreshCommunityPostStats(post);
   await persist();

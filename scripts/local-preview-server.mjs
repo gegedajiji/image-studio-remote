@@ -19,10 +19,10 @@ const mime = {
 };
 
 const templates = [
-  ['guofeng-campaign', '国风宣发', '周芷若联动宣传图', '/assets/templates/guofeng-campaign.svg'],
-  ['porcelain-museum', '博物馆图鉴', '青花瓷博物馆图鉴', '/assets/templates/porcelain-museum.svg'],
-  ['poster-character', '人物海报', '卡芙卡轮廓宇宙海报', '/assets/templates/poster-character.svg'],
-  ['game-scene', '游戏场景', '地平线8深圳实机图', '/assets/templates/game-scene.svg']
+  ['guofeng-campaign', '国风宣发', '周芷若联动宣传图', '/assets/templates/guofeng-campaign.jpg'],
+  ['porcelain-museum', '博物馆图鉴', '青花瓷博物馆图鉴', '/assets/templates/porcelain-museum.jpg'],
+  ['poster-character', '人物海报', '卡芙卡轮廓宇宙海报', '/assets/templates/poster-character.jpg'],
+  ['game-scene', '游戏场景', '地平线8深圳实机图', '/assets/templates/game-scene.jpg']
 ].map(([id, label, title, imageUrl], index) => ({
   id,
   label,

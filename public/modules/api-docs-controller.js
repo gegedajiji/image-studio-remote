@@ -42,6 +42,7 @@ export async function loadApiKeys({ silent = false } = {}) {
 export function renderApiDocsPanel({ force = false } = {}) {
   if (!force && state.activePanel !== 'developers') return;
   bindApiDocsEvents();
+  syncApiDocsOrigin();
   const hint = $('apiKeyAccountHint');
   const list = $('apiKeyList');
   const createButton = $('createApiKeyBtn');
@@ -84,6 +85,38 @@ export function renderApiDocsPanel({ force = false } = {}) {
       </article>
     `).join('')
     : '<p class="feature-empty">还没有 API Key。输入名称后点击创建。</p>';
+}
+
+function syncApiDocsOrigin() {
+  const panel = $('apiDocsPanel');
+  if (!panel) return;
+  const origin = window.location.origin || 'https://your-domain.example';
+  panel.querySelectorAll('[data-copy-api-path]').forEach((button) => {
+    button.dataset.copyText = `${origin}${button.dataset.copyApiPath || ''}`;
+  });
+  const generationExample = panel.querySelector('[data-api-example="generations"]');
+  if (generationExample) {
+    generationExample.textContent = `curl ${origin}/v1/images/generations \\
+  -H "Authorization: Bearer sk-img-xxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "prompt": "一张极简产品海报，柔和自然光，无文字",
+    "quality": "2k",
+    "size": "1024x1024",
+    "output_format": "jpeg",
+    "n": 1
+  }'`;
+  }
+  const editExample = panel.querySelector('[data-api-example="edits"]');
+  if (editExample) {
+    editExample.textContent = `curl ${origin}/v1/images/edits \\
+  -H "Authorization: Bearer sk-img-xxx" \\
+  -F "prompt=把图片改成 iOS 风格产品摄影，背景干净" \\
+  -F "quality=2k" \\
+  -F "size=1024x1024" \\
+  -F "output_format=png" \\
+  -F "image=@source.png"`;
+  }
 }
 
 async function createApiKeyFromDocs() {

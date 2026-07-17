@@ -9,6 +9,7 @@ let callbacks = {
   setMode: () => {},
   setQuality: () => {},
   setSize: () => {},
+  setImageModel: () => {},
   setOutputFormat: () => {},
   setCount: () => {},
   setLayout: () => {},
@@ -25,12 +26,12 @@ export function initGenerationSettingsController(nextCallbacks = {}) {
   callbacks = { ...callbacks, ...nextCallbacks };
 }
 
-export function applyGenerationSettings(item, { submit = false, statusText = '已回填生成参数。' } = {}) {
+export function applyGenerationSettings(item, { submit = false, statusText = '已回填生成参数。', preserveReferenceImage = false } = {}) {
   if (!item) return;
   callbacks.setPreferredStudioRoute('/image/workspace');
   callbacks.switchPanel('studio', { path: '/image/workspace' });
 
-  if (item.mode !== 'edit') {
+  if (!preserveReferenceImage) {
     callbacks.clearReferenceImage();
     callbacks.renderReferencePreview();
   }
@@ -38,6 +39,9 @@ export function applyGenerationSettings(item, { submit = false, statusText = '�
   callbacks.setMode(item.mode === 'edit' ? 'edit' : 'generate');
   if (item.quality) callbacks.setQuality(item.quality);
   if (item.size) callbacks.setSize(item.size);
+  if (item.model || item.imageModel || item.metadata?.requestedModel || item.metadata?.upstreamModel) {
+    callbacks.setImageModel(item.model || item.imageModel || item.metadata?.requestedModel || item.metadata?.upstreamModel);
+  }
   if (item.outputFormat) callbacks.setOutputFormat(item.outputFormat);
   if (item.count) callbacks.setCount(item.count);
   if (item.layout) callbacks.setLayout(item.layout);

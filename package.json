@@ -6,10 +6,20 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/store.js && node --check src/auth.js && node --check src/imageClient.js && node --check public/app.js && node --check scripts/check-store-health.mjs",
+    "guard:home": "node scripts/guard-home.mjs",
+    "guard:release-env": "node scripts/guard-release-env.mjs",
+    "gate": "npm run guard:home && npm run check && npm run smoke:proxy-url-safety && npm run test:store-regression && npm run smoke:generation-flow && npm run smoke:async-generation-flow && npm run health:store",
+    "gate:release": "npm run gate && npm run guard:release-env && npm run smoke:delivery",
+    "gate:ui": "npm run gate && npm run smoke:ui",
+    "check": "find src public scripts -type f ! -name '._*' \\( -name '*.js' -o -name '*.mjs' \\) -print0 | sort -z | xargs -0 -n1 node --check",
     "health:store": "node scripts/check-store-health.mjs",
     "migrate:mysql": "node scripts/migrate-store-to-mysql.mjs",
     "test:store-regression": "node scripts/store-regression.mjs",
+    "smoke:async-generation-flow": "node scripts/smoke-async-generation-flow.mjs",
+    "smoke:delivery": "node scripts/smoke-delivery.mjs",
+    "smoke:generation-flow": "node scripts/smoke-generation-flow.mjs",
+    "smoke:proxy-url-safety": "node scripts/smoke-proxy-url-safety.mjs",
+    "smoke:ui": "node scripts/smoke-ui-routes.mjs",
     "smoke:perf": "node scripts/smoke-performance.mjs"
   },
   "dependencies": {

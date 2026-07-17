@@ -19,11 +19,6 @@ export function selectedPriceText() {
   return `${modeLabel()} · ${label} · ${formatNote} · ${state.count} 张 · ${yuan((state.prices[state.quality] || 0) * state.count)}`;
 }
 
-export function selectedPriceCompactText() {
-  const total = (state.prices[state.quality] || 0) * state.count;
-  return `预计 ${yuan(total)} · 成功后扣费`;
-}
-
 export function stripSpecPrefix(text, prefix) {
   return String(text || '').replace(new RegExp(`^${prefix}\\s*`), '').trim();
 }
@@ -35,10 +30,19 @@ export function setSpecLabel(id, label, value) {
   node.innerHTML = `<small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong>`;
 }
 
+export function imageModelLabel(model = state.imageModel) {
+  const value = String(model || '').trim();
+  if (value) return value;
+  if (state.imageModels.length === 1) return `自动调度 · ${state.imageModels[0]}`;
+  if (state.imageModels.length > 1) return `自动调度 · ${state.imageModels.length} 个模型`;
+  return '未配置';
+}
+
 export function renderSpecLabels() {
   const size = sizeLabels[state.size] || sizeLabels['1024x1024'];
   setSpecLabel('sizeLabel', size.ratio, size.size);
   setSpecLabel('qualityLabel', '质量', stripSpecPrefix(qualityLabels[state.quality] || '质量 1K', '质量'));
+  setSpecLabel('modelLabel', '当前模型', imageModelLabel());
   setSpecLabel('formatLabel', '格式', stripSpecPrefix(formatLabels[state.outputFormat] || '格式 JPEG', '格式'));
   setSpecLabel('countLabel', '数量', String(state.count));
 }

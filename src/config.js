@@ -19,6 +19,10 @@ if (isProduction && (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD =
   throw new Error('生产环境必须设置安全的 ADMIN_PASSWORD，不能使用默认管理员密码');
 }
 
+if (isProduction && (!process.env.APP_SECRET || String(process.env.APP_SECRET).length < 32)) {
+  throw new Error('生产环境必须设置至少 32 位的 APP_SECRET，避免重启后会话失效');
+}
+
 export const config = {
   port: Number(process.env.PORT || 8790),
   publicBaseUrl: process.env.PUBLIC_BASE_URL || 'http://127.0.0.1:8790',
@@ -33,7 +37,8 @@ export const config = {
   prices: {
     '1k': price('PRICE_1K_CENTS', 100),
     '2k': price('PRICE_2K_CENTS', 200)
-  }
+  },
+  purchaseCodeUrl: process.env.PURCHASE_CODE_URL || 'https://catfk.com/shop/aoteman'
 };
 
 export const sizeMap = {

@@ -11,15 +11,15 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json ./
-COPY public ./public
-COPY src ./src
-COPY scripts ./scripts
-COPY docs ./docs
-COPY README.md ./
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package.json package-lock.json ./
+COPY --chown=node:node public ./public
+COPY --chown=node:node src ./src
+COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node docs ./docs
+COPY --chown=node:node README.md ./
 
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN mkdir -p /app/data && chown node:node /app/data
 
 USER node
 

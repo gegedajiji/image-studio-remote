@@ -1,5 +1,6 @@
 import { request } from 'undici';
 import { qualityMap, sizeMap, supportedQualities, supportedSizes } from './config.js';
+import { detectImageMimeType, validateImageBuffer } from './imageValidation.js';
 import { aiSettings, recordImageUpstreamResult } from './store.js';
 
 const promptOptimizeTimeout = 1000 * 25;
@@ -12,6 +13,9 @@ const imageBatchConcurrency = 2;
 const imageTaskRetries = 2;
 const imageEditTaskRetries = 0;
 const imageEditFallbackRetries = 0;
+const imageModelCacheTtlMs = Math.max(30 * 1000, Number(process.env.IMAGE_MODEL_CACHE_TTL_MS || 5 * 60 * 1000));
+const imageModelFetchTimeoutMs = Math.max(3000, Number(process.env.IMAGE_MODEL_FETCH_TIMEOUT_MS || 8000));
+const imageModelCache = new Map();
 
 export function normalizeQuality(quality) {
   if (supportedQualities.includes(quality)) return quality;
@@ -49,6 +53,7 @@ function parseDataUrl(dataUrl, filenamePrefix = 'reference') {
   const buffer = Buffer.from(match[2], 'base64');
   if (!buffer.length) throw new Error('图片内容为空');
   if (buffer.length > 12 * 1024 * 1024) throw new Error('图片不能超过 12 兆');
+  validateImageBuffer(buffer, { mimeType, label: '图片' });
   const extension = mimeType.split('/')[1].replace('jpeg', 'jpg');
   return { buffer, mimeType, filename: `${filenamePrefix}.${extension}` };
 }
@@ -78,17 +83,18 @@ function imageMetadataFromBase64(imageBase64, requestedFormat) {
   if (!imageBase64) {
     return { outputFormat: fallbackFormat, mimeType: mimeForFormat(fallbackFormat) };
   }
-  const bytes = Buffer.from(String(imageBase64).slice(0, 32), 'base64');
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+  const bytes = Buffer.from(String(imageBase64), 'base64');
+  const detectedMimeType = detectImageMimeType(bytes);
+  if (detectedMimeType === 'image/png') {
     return { outputFormat: 'png', mimeType: 'image/png' };
   }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+  if (detectedMimeType === 'image/jpeg') {
     return { outputFormat: 'jpeg', mimeType: 'image/jpeg' };
   }
-  if (bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
+  if (detectedMimeType === 'image/webp') {
     return { outputFormat: 'webp', mimeType: 'image/webp' };
   }
-  return { outputFormat: fallbackFormat, mimeType: mimeForFormat(fallbackFormat) };
+  throw new Error('上游返回了无效图片');
 }
 
 async function parseUpstreamResponse(response, outputFormat = 'jpeg') {
@@ -175,6 +181,29 @@ async function parseTextResponse(response) {
   return optimizedPrompt.slice(0, 1200);
 }
 
+async function requestUpstream(url, options = {}) {
+  if (options.body instanceof FormData) {
+    const response = await fetch(url, {
+      method: options.method || 'POST',
+      headers: options.headers || {},
+      body: options.body,
+      signal: options.signal
+    });
+    const headers = {};
+    response.headers.forEach((value, key) => {
+      headers[key.toLowerCase()] = value;
+    });
+    return {
+      statusCode: response.status,
+      headers,
+      body: {
+        text: () => response.text()
+      }
+    };
+  }
+  return request(url, options);
+}
+
 function buildPromptOptimizerInput({ prompt, mode }) {
   const promptMode = mode === 'edit' ? '图生图' : '文生图';
   return [
@@ -215,9 +244,9 @@ function baseAiSettings() {
   };
 }
 
-function currentImageUpstreams() {
+function configuredImageUpstreams() {
   const settings = baseAiSettings();
-  const configured = settings.imageUpstreams.length
+  return settings.imageUpstreams.length
     ? settings.imageUpstreams
     : [{
       id: 'legacy',
@@ -232,8 +261,178 @@ function currentImageUpstreams() {
       failureCount: 0,
       order: 0
     }];
-  const ready = configured
+}
+
+function isModelName(value) {
+  const model = String(value || '').trim();
+  return Boolean(model && model.length <= 120 && /^[a-zA-Z0-9._:/@-]+$/.test(model));
+}
+
+function normalizeModelNames(models) {
+  return [...new Set((Array.isArray(models) ? models : [])
+    .map((item) => String(item || '').trim())
+    .filter(isModelName))].slice(0, 200);
+}
+
+function modelCacheKey(upstream) {
+  return String(upstream.id || upstream.upstreamBaseUrl || upstream.name || 'default');
+}
+
+function modelCacheSignature(upstream) {
+  const apiKey = String(upstream.upstreamApiKey || '');
+  return [
+    String(upstream.upstreamBaseUrl || ''),
+    apiKey ? `${apiKey.length}:${apiKey.slice(0, 8)}:${apiKey.slice(-4)}` : 'no-key'
+  ].join('|');
+}
+
+function cachedModelsForUpstream(upstream, { allowExpired = true } = {}) {
+  const entry = imageModelCache.get(modelCacheKey(upstream));
+  if (!entry || entry.signature !== modelCacheSignature(upstream)) return [];
+  if (!allowExpired && entry.expiresAt <= Date.now()) return [];
+  return normalizeModelNames(entry.models);
+}
+
+function modelIdFromItem(item) {
+  if (typeof item === 'string') return item;
+  if (!item || typeof item !== 'object') return '';
+  return item.id || item.model || item.name || item.value || '';
+}
+
+function itemLooksImageCapable(item) {
+  if (!item || typeof item !== 'object') return true;
+  const searchable = [
+    item.type,
+    item.object,
+    item.modality,
+    item.category,
+    item.group,
+    Array.isArray(item.modalities) ? item.modalities.join(',') : '',
+    Array.isArray(item.capabilities) ? item.capabilities.join(',') : '',
+    item.capabilities && typeof item.capabilities === 'object' ? Object.keys(item.capabilities).join(',') : ''
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (!searchable) return true;
+  if (/image|vision|multimodal|图片|生图|绘图/.test(searchable)) return true;
+  if (/chat|text|embedding|audio|speech|rerank/.test(searchable)) return false;
+  return true;
+}
+
+function extractModelNames(payload) {
+  const list = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : Array.isArray(payload?.models)
+        ? payload.models
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : [];
+  return normalizeModelNames(list
+    .filter(itemLooksImageCapable)
+    .map(modelIdFromItem));
+}
+
+async function fetchModelsFromEndpoint(upstream, path) {
+  const response = await requestUpstream(`${upstream.upstreamBaseUrl}${path}`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${upstream.upstreamApiKey}`
+    },
+    bodyTimeout: imageModelFetchTimeoutMs,
+    headersTimeout: imageModelFetchTimeoutMs
+  });
+  const text = await response.body.text();
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = null;
+  }
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    const error = new Error(upstreamErrorMessage(payload, text, response.statusCode, '模型列表'));
+    error.statusCode = response.statusCode;
+    throw error;
+  }
+  const models = extractModelNames(payload);
+  if (!models.length) throw new Error('模型列表为空');
+  return models;
+}
+
+async function fetchImageModelsForUpstream(upstream, { force = false } = {}) {
+  const cacheKey = modelCacheKey(upstream);
+  const signature = modelCacheSignature(upstream);
+  const cached = imageModelCache.get(cacheKey);
+  if (!force && cached && cached.signature === signature && cached.expiresAt > Date.now()) {
+    return normalizeModelNames(cached.models);
+  }
+  const endpoints = normalizeModelNames(String(process.env.IMAGE_MODEL_ENDPOINTS || '/v1/models,/models,/model')
+    .split(',')
+    .map((item) => item.trim()))
+    .filter((item) => item.startsWith('/'));
+  let lastError = null;
+  for (const endpoint of endpoints.length ? endpoints : ['/v1/models', '/models', '/model']) {
+    try {
+      const models = await fetchModelsFromEndpoint(upstream, endpoint);
+      imageModelCache.set(cacheKey, {
+        signature,
+        models,
+        fetchedAt: Date.now(),
+        expiresAt: Date.now() + imageModelCacheTtlMs,
+        error: ''
+      });
+      return models;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  imageModelCache.set(cacheKey, {
+    signature,
+    models: cached?.signature === signature ? normalizeModelNames(cached.models) : [],
+    fetchedAt: cached?.fetchedAt || 0,
+    expiresAt: Date.now() + Math.min(imageModelCacheTtlMs, 60 * 1000),
+    error: String(lastError?.message || '模型列表读取失败').slice(0, 240)
+  });
+  return cached?.signature === signature ? normalizeModelNames(cached.models) : [];
+}
+
+export function availableImageModels() {
+  const models = configuredImageUpstreams()
+    .filter((item) => item.enabled && item.upstreamBaseUrl && item.upstreamApiKey && item.imageModel)
+    .flatMap((item) => [
+      ...cachedModelsForUpstream(item),
+      item.imageModel
+    ]);
+  return normalizeModelNames(models);
+}
+
+export async function refreshAvailableImageModels({ force = false } = {}) {
+  const upstreams = configuredImageUpstreams()
     .filter((item) => item.enabled && item.upstreamBaseUrl && item.upstreamApiKey && item.imageModel);
+  const fetched = await Promise.allSettled(upstreams.map((item) => fetchImageModelsForUpstream(item, { force })));
+  return normalizeModelNames([
+    ...fetched.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])),
+    ...upstreams.map((item) => item.imageModel)
+  ]);
+}
+
+function upstreamSupportsRequestedModel(upstream, requestedModel) {
+  if (!requestedModel) return true;
+  if (upstream.imageModel === requestedModel) return true;
+  const cachedModels = cachedModelsForUpstream(upstream);
+  return cachedModels.includes(requestedModel);
+}
+
+function currentImageUpstreams({ imageModel = '' } = {}) {
+  const requestedModel = String(imageModel || '').trim();
+  const configured = configuredImageUpstreams();
+  const ready = configured
+    .filter((item) => item.enabled && item.upstreamBaseUrl && item.upstreamApiKey && item.imageModel)
+    .filter((item) => upstreamSupportsRequestedModel(item, requestedModel))
+    .map((item) => ({
+      ...item,
+      requestImageModel: requestedModel || item.imageModel
+    }));
+  if (requestedModel && !ready.length) throw new Error('所选模型暂无可用通道');
   const now = Date.now();
   const available = ready.filter((item) => !item.cooldownUntil || item.cooldownUntil <= now);
   const upstreams = orderImageUpstreams(available.length ? available : ready, { cooldownFallback: !available.length });
@@ -248,12 +447,44 @@ function currentTextSettings() {
   return settings;
 }
 
-async function withUpstreamTimeout(label, timeoutMs, action) {
+function abortError(message = '生成任务已取消') {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  error.code = 'GENERATION_ABORTED';
+  return error;
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error ? signal.reason : abortError();
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.code === 'GENERATION_ABORTED' || error?.code === 'UND_ERR_ABORTED';
+}
+
+async function sleep(ms, signal = null) {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : abortError());
+    };
+    signal?.addEventListener?.('abort', abort, { once: true });
+  });
+}
+
+async function withUpstreamTimeout(label, timeoutMs, action, parentSignal = null) {
+  throwIfAborted(parentSignal);
   const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal.reason || abortError());
+  parentSignal?.addEventListener?.('abort', abortFromParent, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await action(controller.signal);
   } catch (error) {
+    if (parentSignal?.aborted) throw parentSignal.reason instanceof Error ? parentSignal.reason : abortError();
     if (controller.signal.aborted || error?.name === 'AbortError' || error?.code === 'UND_ERR_ABORTED') {
       const timeoutError = new Error(`${label}响应超时`);
       timeoutError.code = 'UPSTREAM_TIMEOUT';
@@ -262,6 +493,7 @@ async function withUpstreamTimeout(label, timeoutMs, action) {
     throw error;
   } finally {
     clearTimeout(timer);
+    parentSignal?.removeEventListener?.('abort', abortFromParent);
   }
 }
 
@@ -274,17 +506,20 @@ async function runImageTasks(tasks, options = {}) {
   const taskList = Array.isArray(tasks) ? tasks.filter((item) => typeof item === 'function') : [];
   const runs = taskList.length;
   const retries = Math.max(0, Math.trunc(Number(options.retries ?? imageTaskRetries)) || 0);
+  const signal = options.signal || null;
   const results = [];
   const failures = [];
   let cursor = 0;
   const workerCount = Math.min(imageBatchConcurrency, runs);
   const workers = Array.from({ length: workerCount }, async () => {
     while (cursor < runs) {
+      throwIfAborted(signal);
       const index = cursor;
       cursor += 1;
       try {
-        results[index] = await runImageTaskWithRetry(taskList[index], { retries });
+        results[index] = await runImageTaskWithRetry(taskList[index], { retries, signal });
       } catch (error) {
+        if (signal?.aborted) throw error;
         failures[index] = error;
       }
     }
@@ -317,15 +552,16 @@ async function runImageTasks(tasks, options = {}) {
   throw error;
 }
 
-async function runImageTaskWithRetry(task, { retries = imageTaskRetries } = {}) {
+async function runImageTaskWithRetry(task, { retries = imageTaskRetries, signal = null } = {}) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    throwIfAborted(signal);
     try {
       return await task();
     } catch (error) {
       lastError = error;
       if (!shouldRetryImageTask(error, attempt, retries)) break;
-      await sleep(retryDelayMs(error, attempt));
+      await sleep(retryDelayMs(error, attempt), signal);
     }
   }
   throw lastError;
@@ -333,13 +569,10 @@ async function runImageTaskWithRetry(task, { retries = imageTaskRetries } = {}) 
 
 function shouldRetryImageTask(error, attempt, retries = imageTaskRetries) {
   if (attempt >= retries) return false;
+  if (isAbortError(error)) return false;
   const statusCode = Number(error?.statusCode || 0);
   if ([400, 401, 403, 404, 422].includes(statusCode)) return false;
   return true;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function retryAfterMs(value) {
@@ -365,7 +598,7 @@ function upstreamMetadata(upstream) {
     upstreamId: upstream.id || null,
     upstreamName: upstream.name || null,
     upstreamBaseUrl: upstream.upstreamBaseUrl || null,
-    upstreamModel: upstream.imageModel || null
+    upstreamModel: upstream.requestImageModel || upstream.imageModel || null
   };
 }
 
@@ -410,7 +643,7 @@ function weightedShuffle(items) {
 function shouldTryNextImageUpstream(error, index, upstreamCount) {
   if (index >= upstreamCount - 1) return false;
   const statusCode = Number(error?.statusCode || 0);
-  if ([400, 401, 403, 404, 422].includes(statusCode)) return false;
+  if ([400, 422].includes(statusCode)) return false;
   return true;
 }
 
@@ -428,18 +661,19 @@ function summarizeImageUpstreamErrors(errors) {
     .slice(0, 900);
 }
 
-async function requestImageWithDispatch({ label, timeoutMs, path, buildRequest, outputFormat }) {
-  const upstreams = currentImageUpstreams();
+async function requestImageWithDispatch({ label, timeoutMs, path, buildRequest, outputFormat, imageModel = '', signal = null }) {
+  const upstreams = currentImageUpstreams({ imageModel });
   const errors = [];
   for (let index = 0; index < upstreams.length; index += 1) {
+    throwIfAborted(signal);
     const upstream = upstreams[index];
     const startedAt = Date.now();
     try {
       const result = await withUpstreamTimeout(`${label}「${upstream.name || index + 1}」`, timeoutMs, async (signal) => {
         const requestOptions = buildRequest(upstream, signal);
-        const response = await request(`${upstream.upstreamBaseUrl}${path}`, requestOptions);
+        const response = await requestUpstream(`${upstream.upstreamBaseUrl}${path}`, requestOptions);
         return parseUpstreamResponse(response, outputFormat);
-      });
+      }, signal);
       await recordImageUpstreamResult({ upstreamId: upstream.id, success: true }).catch(() => {});
       const attempts = [
         ...errors,
@@ -459,6 +693,9 @@ async function requestImageWithDispatch({ label, timeoutMs, path, buildRequest, 
         upstreamAttempts: attempts
       };
     } catch (error) {
+      if (signal?.aborted || isAbortError(error)) {
+        throw error;
+      }
       if (shouldRecordImageUpstreamFailure(error)) {
         await recordImageUpstreamResult({
           upstreamId: upstream.id,
@@ -652,7 +889,7 @@ export async function chatText({ message, model, reasoningEffort, images }) {
   return parseTextResponse(response);
 }
 
-async function generateOneImage({ prompt, quality, size, outputFormat, timeoutMs = imageGenerateTotalTimeout }) {
+async function generateOneImage({ prompt, quality, size, outputFormat, imageModel = '', timeoutMs = imageGenerateTotalTimeout, signal = null }) {
   const normalized = normalizeQuality(quality);
   const normalizedSize = normalizeSize(size || sizeMap[normalized]);
   const normalizedFormat = normalizeOutputFormatForSize(outputFormat, normalizedSize);
@@ -662,6 +899,8 @@ async function generateOneImage({ prompt, quality, size, outputFormat, timeoutMs
     timeoutMs,
     path: '/v1/images/generations',
     outputFormat: normalizedFormat,
+    imageModel,
+    signal,
     buildRequest: (upstream, signal) => ({
       method: 'POST',
       headers: {
@@ -669,7 +908,7 @@ async function generateOneImage({ prompt, quality, size, outputFormat, timeoutMs
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: upstream.imageModel,
+        model: upstream.requestImageModel || upstream.imageModel,
         prompt,
         n: 1,
         size: normalizedSize,
@@ -683,7 +922,7 @@ async function generateOneImage({ prompt, quality, size, outputFormat, timeoutMs
   });
 }
 
-async function editOneImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat }) {
+async function editOneImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat, imageModel = '', signal = null }) {
   const normalized = normalizeQuality(quality);
   const normalizedSize = normalizeSize(size || sizeMap[normalized]);
   const normalizedFormat = normalizeOutputFormatForSize(outputFormat, normalizedSize);
@@ -699,9 +938,11 @@ async function editOneImage({ prompt, quality, imageDataUrl, imageDataUrls, mask
     timeoutMs: imageEditTotalTimeout,
     path: '/v1/images/edits',
     outputFormat: normalizedFormat,
+    imageModel,
+    signal,
     buildRequest: (upstream, signal) => {
       const form = new FormData();
-      form.set('model', upstream.imageModel);
+      form.set('model', upstream.requestImageModel || upstream.imageModel);
       form.set('prompt', prompt);
       form.set('n', '1');
       form.set('size', normalizedSize);
@@ -798,19 +1039,21 @@ async function buildEditFallbackPrompt({ prompt, imageDataUrl, imageDataUrls, ma
   ].filter(Boolean).join('\n');
 }
 
-export async function generateImage({ prompt, quality, size, outputFormat, count, retries = imageTaskRetries, timeoutMs = imageGenerateTotalTimeout }) {
-  const results = await runImageBatch(count, () => generateOneImage({ prompt, quality, size, outputFormat, timeoutMs }), { retries });
+export async function generateImage({ prompt, quality, size, outputFormat, count, imageModel = '', retries = imageTaskRetries, timeoutMs = imageGenerateTotalTimeout, signal = null }) {
+  const results = await runImageBatch(count, () => generateOneImage({ prompt, quality, size, outputFormat, imageModel, timeoutMs, signal }), { retries, signal });
   return mergeImageResults(results);
 }
 
-export async function editImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat, count }) {
+export async function editImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat, count, imageModel = '', signal = null }) {
   try {
-    const results = await runImageBatch(count, () => editOneImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat }), { retries: imageEditTaskRetries });
+    const results = await runImageBatch(count, () => editOneImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat, imageModel, signal }), { retries: imageEditTaskRetries, signal });
     return mergeImageResults(results);
   } catch (error) {
     if (!shouldFallbackEdit(error)) throw error;
+    throwIfAborted(signal);
     const fallbackPrompt = await buildEditFallbackPrompt({ prompt, imageDataUrl, imageDataUrls, maskDataUrl });
-    const result = await generateImage({ prompt: fallbackPrompt, quality, size, outputFormat, count, retries: imageEditFallbackRetries, timeoutMs: imageEditFallbackGenerateTimeout });
+    throwIfAborted(signal);
+    const result = await generateImage({ prompt: fallbackPrompt, quality, size, outputFormat, count, imageModel, retries: imageEditFallbackRetries, timeoutMs: imageEditFallbackGenerateTimeout, signal });
     return {
       ...result,
       editFallback: true,
@@ -819,13 +1062,13 @@ export async function editImage({ prompt, quality, imageDataUrl, imageDataUrls, 
   }
 }
 
-export async function generateStoryboardImages({ prompts, quality, size, outputFormat }) {
+export async function generateStoryboardImages({ prompts, quality, size, outputFormat, imageModel = '', signal = null }) {
   const scenes = Array.isArray(prompts)
     ? prompts.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4)
     : [];
   if (!scenes.length) throw new Error('请先生成分镜草稿');
-  const tasks = scenes.map((prompt) => () => generateOneImage({ prompt, quality, size, outputFormat }));
-  const results = await runImageTasks(tasks, { retries: imageTaskRetries });
+  const tasks = scenes.map((prompt) => () => generateOneImage({ prompt, quality, size, outputFormat, imageModel, signal }));
+  const results = await runImageTasks(tasks, { retries: imageTaskRetries, signal });
   return {
     ...mergeImageResults(results),
     sceneCount: results.length,
@@ -833,13 +1076,13 @@ export async function generateStoryboardImages({ prompts, quality, size, outputF
   };
 }
 
-export async function editStoryboardImages({ prompts, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat }) {
+export async function editStoryboardImages({ prompts, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat, imageModel = '', signal = null }) {
   const scenes = Array.isArray(prompts)
     ? prompts.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 4)
     : [];
   if (!scenes.length) throw new Error('请先生成分镜草稿');
-  const tasks = scenes.map((prompt) => () => editOneImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat }));
-  const results = await runImageTasks(tasks, { retries: imageEditTaskRetries });
+  const tasks = scenes.map((prompt) => () => editOneImage({ prompt, quality, imageDataUrl, imageDataUrls, maskDataUrl, size, outputFormat, imageModel, signal }));
+  const results = await runImageTasks(tasks, { retries: imageEditTaskRetries, signal });
   return {
     ...mergeImageResults(results),
     sceneCount: results.length,

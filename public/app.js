@@ -6,6 +6,7 @@ import {
   recommendedQualityMap,
   recommendedSizeMap,
   routeByPanel,
+  studioCompactMediaQuery,
   supportedSizes
 } from './modules/constants.js';
 import { $, scrollIntoViewSafe } from './modules/dom.js';
@@ -35,6 +36,7 @@ import {
   deleteHistoryGeneration,
   initHistoryController,
   loadHistory,
+  loadMoreHistory,
   publishHistoryGeneration,
   reuseHistoryGeneration
 } from './modules/history-controller.js';
@@ -42,6 +44,7 @@ import { initInfiniteCanvas } from './modules/infinite-canvas-entry.js';
 import { setAuthStatus, setInlineStatus, setStatus } from './modules/status-ui.js';
 import {
   addReferenceImage,
+  applyModeFromSources,
   clearReferenceImage,
   clearSelectionMask,
   currentImageDataUrls,
@@ -84,6 +87,7 @@ import {
 } from './modules/generation-runner.js';
 import {
   beginGenerationActivity,
+  cancelGenerationActivity,
   finishGenerationActivity,
   isCurrentGenerationActivity,
   isGenerateButtonLocked,
@@ -153,11 +157,11 @@ import {
   formatResultLabel,
   generationModeText,
   generationStatusText,
+  imageModelLabel,
   qualityLabel,
   redeemStatusForClass,
   redeemStatusText,
   renderSpecLabels,
-  selectedPriceCompactText,
   selectedPriceText,
   sizeLabelText,
   sourceText,
@@ -188,14 +192,90 @@ const scheduleAdminGenerationLogSearch = createDebouncer(260);
 const scheduleAdminRedeemSearch = createDebouncer(260);
 
 let preferredStudioRoute = '/image/history';
+let authReasonText = '';
+let autoResumePendingGenerationId = '';
+let autoResumePendingTimer = 0;
+
+const adminPathTabMap = {
+  '/admin/billing': 'billing',
+  '/admin/upstream': 'upstream',
+  '/admin/generation-logs': 'generationLogs',
+  '/admin/logs': 'generationLogs',
+  '/admin/redeem': 'redeem',
+  '/admin/codes': 'redeem',
+  '/admin/users': 'users',
+  '/admin/community': 'community'
+};
 
 function panelFromPath(pathname = window.location.pathname) {
-  if (pathname.startsWith('/prompts')) return 'prompts';
+  if (pathname.startsWith('/prompts') || pathname.startsWith('/community')) return 'prompts';
   if (pathname.startsWith('/agent')) return 'agent';
   if (pathname.startsWith('/api-docs') || pathname.startsWith('/developers')) return 'developers';
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/admin')) return 'admin';
   return 'studio';
+}
+
+function studioPathShowsHistory(pathname = window.location.pathname) {
+  return pathname === '/image/history' || pathname.startsWith('/image/history/');
+}
+
+function syncStudioHistoryLayoutFromPath(pathname = window.location.pathname) {
+  if (state.activePanel !== 'studio') return;
+  const showHistory = studioPathShowsHistory(pathname);
+  if (window.matchMedia(studioCompactMediaQuery).matches) {
+    document.body.classList.remove('history-opened', 'history-collapsed');
+    document.body.classList.toggle('history-mobile-open', showHistory);
+    return;
+  }
+  document.body.classList.remove('history-mobile-open');
+  document.body.classList.toggle('history-opened', showHistory);
+  document.body.classList.toggle('history-collapsed', !showHistory);
+}
+
+function pushStudioHistoryRoute(showHistory) {
+  const nextPath = showHistory ? '/image/history' : '/image/workspace';
+  preferredStudioRoute = nextPath;
+  if (window.location.pathname !== nextPath) {
+    window.history.pushState({ panel: 'studio' }, '', nextPath);
+  }
+}
+
+function scheduleAutoResumePendingGeneration() {
+  if (autoResumePendingTimer) {
+    window.clearTimeout(autoResumePendingTimer);
+    autoResumePendingTimer = 0;
+  }
+  if (!state.user || state.activePanel !== 'studio' || !studioPathShowsHistory()) return;
+  if (document.body.classList.contains('generating-active')) return;
+  const pending = state.historyItems.find((item) => item?.status === 'pending');
+  if (!pending?.id || autoResumePendingGenerationId === pending.id) return;
+  autoResumePendingGenerationId = pending.id;
+  autoResumePendingTimer = window.setTimeout(async () => {
+    autoResumePendingTimer = 0;
+    const current = state.historyItems.find((item) => item?.id === pending.id && item.status === 'pending');
+    if (!current || state.activePanel !== 'studio' || !studioPathShowsHistory() || document.body.classList.contains('generating-active')) {
+      autoResumePendingGenerationId = '';
+      return;
+    }
+    try {
+      await resumePendingGeneration(current.id, current);
+    } catch (error) {
+      setStatus(error.message || '正在生成的任务接回失败，可以稍后从历史继续查看。', true);
+    } finally {
+      const stillPending = state.historyItems.some((item) => item?.id === pending.id && item.status === 'pending');
+      if (!stillPending) autoResumePendingGenerationId = '';
+    }
+  }, 320);
+}
+
+function adminTabFromPath(pathname = window.location.pathname) {
+  return adminPathTabMap[pathname] || 'overview';
+}
+
+function adminPathFromTab(tab) {
+  const entry = Object.entries(adminPathTabMap).find(([, value]) => value === tab);
+  return entry?.[0] || '/admin';
 }
 
 let promptLibraryData = {
@@ -210,20 +290,29 @@ async function refreshHealth() {
   if (!pill) return;
   try {
     const data = await api('/api/health');
+    state.imageReady = Boolean(data.imageReady);
+    state.textReady = Boolean(data.textReady);
     pill.classList.remove('offline', 'partial');
-    pill.classList.toggle('partial', data.imageReady && !data.textReady);
-    pill.title = data.textReady ? '图片生成和图片助手均已连接' : '图片生成已连接，图片助手暂不可用';
-    pill.lastChild.textContent = data.textReady ? '图片就绪' : '图片就绪 · 助手离线';
-    if ($('settingsImageModel')) $('settingsImageModel').textContent = '图像通道已配置';
-    if ($('settingsUpstream')) $('settingsUpstream').textContent = '通道已连接';
-    if ($('agentModelBadge')) $('agentModelBadge').textContent = data.textReady ? '文本模型已连接' : '文本模型';
+    pill.classList.toggle('offline', !state.imageReady);
+    pill.classList.toggle('partial', state.imageReady && !state.textReady);
+    pill.title = state.imageReady
+      ? (state.textReady ? '图片生成和图片助手均已连接' : '图片生成已连接，图片助手暂不可用')
+      : '图像通道未配置，请联系管理员设置上游地址和密钥';
+    pill.lastChild.textContent = state.imageReady
+      ? (state.textReady ? '图片就绪' : '图片就绪 · 助手离线')
+      : '图片未配置';
+    if ($('settingsImageModel')) $('settingsImageModel').textContent = state.imageReady ? '图像通道已配置' : '图像通道未配置';
+    if ($('settingsUpstream')) $('settingsUpstream').textContent = state.imageReady ? '通道已连接' : '请在管理后台配置上游';
+    if ($('agentModelBadge')) $('agentModelBadge').textContent = state.textReady ? '文本模型已连接' : '文本模型未连接';
   } catch {
+    state.imageReady = false;
+    state.textReady = false;
     pill.classList.remove('partial');
     pill.classList.add('offline');
-    pill.title = '本地服务异常';
+    pill.title = '图像服务异常';
     pill.lastChild.textContent = '异常';
     if ($('settingsImageModel')) $('settingsImageModel').textContent = '服务异常';
-    if ($('settingsUpstream')) $('settingsUpstream').textContent = '请检查本地服务';
+    if ($('settingsUpstream')) $('settingsUpstream').textContent = '请检查图像服务配置';
   }
 }
 
@@ -357,6 +446,26 @@ async function runPendingAuthAction() {
     }
     if (pending.type === 'generate') {
       await submitGeneration(pending.statusText || '登录成功，正在继续生成…');
+      return { attempted: true, success: true };
+    }
+    if (pending.type === 'recharge') {
+      openRechargeModal(pending.options || {});
+      return { attempted: true, success: true };
+    }
+    if (pending.type === 'admin') {
+      if (state.user?.role !== 'admin') {
+        switchPanel('settings');
+        setStatus('当前账号不是管理员，无法进入管理后台。', true);
+        return { attempted: true, success: false };
+      }
+      state.adminActiveTab = pending.tab || adminTabFromPath(pending.path || window.location.pathname);
+      switchPanel('admin', { path: adminPathFromTab(state.adminActiveTab) });
+      await loadAdmin();
+      return { attempted: true, success: true };
+    }
+    if (pending.type === 'resumeGeneration') {
+      switchPanel('studio', { path: '/image/history' });
+      await resumePendingGeneration(pending.generationId, pending.summary || null);
       return { attempted: true, success: true };
     }
     if (pending.type === 'publish') {
@@ -633,6 +742,15 @@ function friendlyOptimizeError(message) {
   return text || '优化失败，请稍后重试。';
 }
 
+const workspaceHeaderMeta = {
+  studio: ['图片工作台', '有鱼生图', '余额与历史同步'],
+  prompts: ['作品交流区', '精选作品', '点赞评论决定热度'],
+  agent: ['图片助手', '提示词与构思', '辅助创作'],
+  developers: ['API 文档', '密钥与调用', '按钱包余额扣费'],
+  settings: ['账号与通道', '账户设置', '余额与兑换码充值'],
+  admin: ['管理后台', '管理员', '价格、卡密、用户']
+};
+
 function closePromptOwnedUi({ preserveRoute = false } = {}) {
   closeCommunityDetailModal({ preserveRoute });
   closeCommunityPublishModal();
@@ -652,17 +770,29 @@ function switchPanel(panel, options = {}) {
   syncAdminVisibility();
   document.body.dataset.panel = state.activePanel;
   syncPanelVisibility();
+  const currentPath = window.location.pathname;
+  const currentStudioPath = panelFromPath(currentPath) === 'studio' ? currentPath : '';
   const nextPath = state.activePanel === 'studio'
-    ? (options.path || preferredStudioRoute || routeByPanel.studio)
-    : routeByPanel[state.activePanel];
+    ? (options.path || (options.updateUrl === false && currentStudioPath ? currentStudioPath : preferredStudioRoute || routeByPanel.studio))
+    : state.activePanel === 'admin'
+      ? (options.path || adminPathFromTab(state.adminActiveTab) || routeByPanel.admin)
+      : routeByPanel[state.activePanel];
   if (options.updateUrl !== false && window.location.pathname !== nextPath) {
     window.history.pushState({ panel: state.activePanel }, '', nextPath);
   }
+  if (state.activePanel === 'studio') syncStudioHistoryLayoutFromPath(nextPath);
   document.querySelectorAll('[data-panel-target]').forEach((node) => {
     node.classList.toggle('active', node.dataset.panelTarget === state.activePanel);
     node.classList.toggle('rail-active', node.dataset.panelTarget === state.activePanel);
     if (node.tagName === 'A') node.setAttribute('href', routeByPanel[node.dataset.panelTarget] || '/image/history');
   });
+  const activeRailItem = document.querySelector('.studio-rail .rail-action.rail-active');
+  const mobileRailGrid = window.matchMedia('(max-width: 760px)').matches;
+  if (activeRailItem && window.matchMedia(studioCompactMediaQuery).matches && !mobileRailGrid) {
+    requestAnimationFrame(() => {
+      scrollIntoViewSafe(activeRailItem, { block: 'nearest', inline: 'nearest' });
+    });
+  }
   if (state.activePanel === 'prompts' && !state.communityPosts.length) loadCommunityPosts();
   if (state.activePanel === 'developers' && state.user && !state.apiKeys.length) loadApiKeys();
   if (state.activePanel === 'admin' && state.user?.role === 'admin') loadAdmin();
@@ -697,6 +827,7 @@ function renderActivePanel() {
 function syncPanelVisibility() {
   const studioVisible = state.activePanel === 'studio';
   const workspaceVisible = state.activePanel !== 'admin';
+  const workspaceHeader = document.querySelector('.workspace-header');
   const workspaceContent = document.querySelector('.workspace-content');
   const historyPanel = $('historySection');
   const introPanel = document.querySelector('.intro-panel');
@@ -707,6 +838,19 @@ function syncPanelVisibility() {
   const apiDocsPanel = $('apiDocsPanel');
   const settingsPanel = $('settingsPanel');
   const adminPanel = $('adminConsolePanel');
+
+  if (workspaceHeader) {
+    const [title, primaryBadge, secondaryBadge] = workspaceHeaderMeta[state.activePanel] || workspaceHeaderMeta.studio;
+    workspaceHeader.hidden = state.activePanel === 'admin';
+    workspaceHeader.setAttribute('aria-hidden', String(state.activePanel === 'admin'));
+    if ($('workspaceHeaderTitle')) $('workspaceHeaderTitle').textContent = title;
+    if ($('workspaceHeaderPrimaryBadge')) $('workspaceHeaderPrimaryBadge').textContent = primaryBadge;
+    if ($('workspaceHeaderSecondaryBadge')) $('workspaceHeaderSecondaryBadge').textContent = secondaryBadge;
+    document.querySelectorAll('[data-studio-header-only]').forEach((node) => {
+      node.hidden = !studioVisible;
+      node.setAttribute('aria-hidden', String(!studioVisible));
+    });
+  }
 
   if (workspaceContent) {
     workspaceContent.hidden = !workspaceVisible;
@@ -735,6 +879,9 @@ function syncPanelWithLocation(options = {}) {
   const expectedPanel = panelFromPath();
   if (expectedPanel !== state.activePanel || document.body.dataset.panel !== expectedPanel) {
     switchPanel(expectedPanel, { updateUrl: false, ...options });
+  } else if (expectedPanel === 'studio') {
+    syncStudioHistoryLayoutFromPath();
+    normalizeHistoryLayoutState();
   }
 }
 
@@ -827,8 +974,8 @@ async function loadMaterialAsReference(url) {
   const response = await fetch(url, { cache: 'no-store' });
   if (!response.ok) throw new Error(`素材读取失败 (${response.status})`);
   const blob = await response.blob();
-  if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(blob.type)) {
-    throw new Error('素材格式不支持');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) {
+    throw new Error('参考图只支持 JPG、PNG、WEBP 格式');
   }
   if (blob.size > 12 * 1024 * 1024) throw new Error('素材不能超过 12 兆');
   return new Promise((resolve, reject) => {
@@ -918,6 +1065,37 @@ function resetCommunitySessionStateForUser(nextUser) {
   state.creatorFeedbackReplyingId = '';
   state.communityActionPendingKeys = [];
   state.communityDownloadPendingIds = [];
+}
+
+function resetStudioSessionStateForUser(nextUser) {
+  if (state.user?.id === nextUser?.id) return;
+  if (!state.user?.id && nextUser?.id) return;
+  if (autoResumePendingTimer) {
+    window.clearTimeout(autoResumePendingTimer);
+    autoResumePendingTimer = 0;
+  }
+  autoResumePendingGenerationId = '';
+  cancelGenerationActivity();
+  closeSelectionModal();
+  closePillMenus();
+  clearCommunityReuseSource();
+  state.prompts = { generate: '', edit: '' };
+  state.historyItems = [];
+  state.historyTotal = 0;
+  state.historyDeletableCount = 0;
+  state.historyNextOffset = 0;
+  state.historyHasMore = false;
+  state.historyLoadingMore = false;
+  state.historyRenderLimit = 48;
+  state.previewItem = null;
+  state.previewState = 'empty';
+  $('prompt') && ($('prompt').value = '');
+  clearReferenceImage();
+  renderReferencePreview();
+  setMode('generate');
+  renderPreviewEmpty();
+  updatePromptCount();
+  updateComposerPromptState();
 }
 
 function canKeepCommunityPrivateFields(post) {
@@ -1212,9 +1390,17 @@ function renderCommunityPanel({ force = false } = {}) {
 }
 
 async function loadStudioTemplates({ silent = false } = {}) {
-  state.studioTemplates = [];
-  state.studioTemplatesLoading = false;
+  state.studioTemplatesLoading = true;
   if (!silent) renderStudioTemplateCards();
+  try {
+    const data = await api('/api/community/studio-templates');
+    state.studioTemplates = Array.isArray(data.templates) ? data.templates : [];
+  } catch {
+    state.studioTemplates = [];
+  } finally {
+    state.studioTemplatesLoading = false;
+    if (!silent || state.activePanel === 'studio') renderStudioTemplateCards();
+  }
 }
 
 function communityEmptyMessage({ query = '', activeTag = '' } = {}) {
@@ -1995,7 +2181,11 @@ async function useCommunityPrompt(post, options = {}) {
         statusText = `来源参考图读取失败，已保留当前工作台，只带入提示词和参数：${error.message}`;
       }
     }
-    applyGenerationSettings(settings, { submit: false, statusText });
+    applyGenerationSettings(settings, {
+      submit: false,
+      statusText,
+      preserveReferenceImage: settings.mode === 'edit' && referenceMode !== 'prompt'
+    });
     state.communityReusePendingPostId = post.id;
     state.communityReusePendingToken = post.reuseIntentToken || '';
     renderCommunityReuseSourceBar();
@@ -3403,6 +3593,29 @@ function setCommunityPublishDialogMode(mode) {
   if ($('communityPublishSubmitBtn')) $('communityPublishSubmitBtn').textContent = isEdit ? '保存修改' : (isReuseCreate ? '发布我的版本' : '上传到交流区');
 }
 
+function hasPublishableSourceImages(source) {
+  return Boolean(source?.mode === 'edit' && Array.isArray(source.sourceImages) && source.sourceImages.some((image) => image?.imageUrl));
+}
+
+function syncCommunitySourceConsent(source, { isEdit = false, checked = null } = {}) {
+  const wrapper = $('communitySourceConsent');
+  const input = $('communityShowSourceImages');
+  if (!wrapper || !input) return;
+  const canShow = hasPublishableSourceImages(source);
+  wrapper.hidden = !canShow;
+  wrapper.setAttribute('aria-hidden', String(!canShow));
+  if (!canShow) {
+    input.checked = false;
+    state.communityPublishShowSourceImages = false;
+    return;
+  }
+  const nextChecked = checked === null
+    ? (isEdit ? Boolean(source?.showSourceImages) : true)
+    : Boolean(checked);
+  input.checked = nextChecked;
+  state.communityPublishShowSourceImages = nextChecked;
+}
+
 function renderCommunityPublishPreview(source, imageIndex = 0) {
   const node = $('communityPublishPreview');
   if (!node) return;
@@ -3506,6 +3719,9 @@ function openCommunityPublish(item, imageIndex = 0, options = {}) {
   state.communityPublishGeneration = { ...item, selectedImageIndex, selectedImageIndexes: [...state.communityPublishImageIndexes] };
   state.communityEditingPost = null;
   const draft = communityPublishDraft(item);
+  syncCommunitySourceConsent(item, {
+    checked: typeof options.showSourceImages === 'boolean' ? options.showSourceImages : null
+  });
   const sourceTitle = String(item.reuseSourcePost?.title || '交流区作品').trim();
   $('communityPostTitle').value = item.reuseSourcePost?.id
     ? `${sourceTitle.slice(0, 18)}的我的版本`.slice(0, 28)
@@ -3536,6 +3752,7 @@ function openCommunityEdit(postId) {
   state.communityPublishGeneration = null;
   state.communityPublishImageIndexes = [];
   state.communityEditingPost = post;
+  syncCommunitySourceConsent(post, { isEdit: true });
   $('communityPostTitle').value = post.title || '';
   $('communityPostDescription').value = post.description || '';
   $('communityPostTags').value = (post.tags || []).join(', ');
@@ -3554,6 +3771,8 @@ function closeCommunityPublishModal() {
   state.communityPublishMode = 'create';
   state.communityPublishPending = false;
   state.communityPublishImageIndexes = [];
+  state.communityPublishShowSourceImages = false;
+  syncCommunitySourceConsent(null);
   setCommunityPublishDialogMode('create');
   if ($('communityPublishPreview')) $('communityPublishPreview').innerHTML = '';
   syncCommunityPublishSubmitState();
@@ -3565,29 +3784,55 @@ function communityPublishFormDraft() {
     title: $('communityPostTitle')?.value.trim() || '',
     description: $('communityPostDescription')?.value.trim() || '',
     tagsText: $('communityPostTags')?.value || '',
-    imageIndexes: [...state.communityPublishImageIndexes]
+    imageIndexes: [...state.communityPublishImageIndexes],
+    showSourceImages: Boolean($('communityShowSourceImages')?.checked)
   };
 }
 
 function validateCommunityPublishDraft() {
   const title = $('communityPostTitle')?.value.trim() || '';
-  const description = $('communityPostDescription')?.value.trim() || '';
+  const description = sanitizeCommunityPublishDescription($('communityPostDescription')?.value || '');
   const tags = parseTags($('communityPostTags')?.value || '');
   if (!title) throw new Error('请输入作品标题。');
   if (title.length > 60) throw new Error('标题不能超过 60 个字。');
   if (description.length > 300) throw new Error('介绍不能超过 300 个字。');
+  if ($('communityPostDescription') && $('communityPostDescription').value.trim() !== description) {
+    $('communityPostDescription').value = description;
+  }
   if (tags.length > 8) throw new Error('标签最多 8 个。');
   return {
     title,
     description,
-    tags
+    tags,
+    showSourceImages: Boolean(!$('communitySourceConsent')?.hidden && $('communityShowSourceImages')?.checked)
   };
+}
+
+function sanitizeCommunityPublishDescription(value) {
+  const placeholderPrefixes = [
+    '我想把它用于：',
+    '希望大家帮我看：',
+    '最想听哪一处建议：'
+  ];
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false;
+      return !placeholderPrefixes.some((prefix) => line === prefix);
+    })
+    .join('\n')
+    .slice(0, 300);
 }
 
 function applyCommunityPublishFormDraft(draft = {}) {
   if ($('communityPostTitle') && draft.title !== undefined) $('communityPostTitle').value = draft.title;
   if ($('communityPostDescription') && draft.description !== undefined) $('communityPostDescription').value = draft.description;
   if ($('communityPostTags') && draft.tagsText !== undefined) $('communityPostTags').value = draft.tagsText;
+  if (typeof draft.showSourceImages === 'boolean' && $('communityShowSourceImages')) {
+    $('communityShowSourceImages').checked = draft.showSourceImages;
+    state.communityPublishShowSourceImages = draft.showSourceImages;
+  }
   if (Array.isArray(draft.imageIndexes) && state.communityPublishMode === 'create') {
     const entries = imageEntries(state.communityPublishGeneration);
     state.communityPublishImageIndexes = normalizeImageIndexSelection(draft.imageIndexes, entries, draft.imageIndexes[0] || 0);
@@ -3709,7 +3954,8 @@ async function submitCommunityEdit() {
       body: {
         title: draft.title,
         description: draft.description,
-        tags: draft.tags
+        tags: draft.tags,
+        showSourceImages: draft.showSourceImages
       }
     });
     closeCommunityPublishModal();
@@ -3753,7 +3999,8 @@ async function submitCommunityPublish() {
         imageIndexes: state.communityPublishImageIndexes,
         title: draft.title,
         description: draft.description,
-        tags: draft.tags
+        tags: draft.tags,
+        showSourceImages: draft.showSourceImages
       }
     });
     if (state.previewItem?.id === item.id) {
@@ -3812,15 +4059,18 @@ const railAuthIcon = (label, path) => `
 
 function openAuthModal(options = {}) {
   setAuthStatus('');
-  setAuthMode('login');
   const reasonText = {
     generate: '登录后继续生成，并保存历史记录。',
+    recharge: '登录后继续兑换卡密充值。',
+    admin: '登录管理员账号后回到管理后台。',
     publish: '登录后继续上传到交流区。',
     comment: '登录后继续评论这张作品。',
     like: '登录后继续点赞这张作品。',
     tip: '登录后继续自愿支持作者。',
     download: '登录后继续下载；交流区图片仍然免费下载。'
-  }[options.reason];
+  }[options.reason] || '';
+  authReasonText = reasonText;
+  setAuthMode('login');
   if (reasonText) $('authIntro').textContent = reasonText;
   $('authModal').classList.add('open');
   $('authModal').setAttribute('aria-hidden', 'false');
@@ -3838,19 +4088,32 @@ function closeAuthModal(options = {}) {
 function setAuthMode(mode) {
   state.authMode = mode === 'register' ? 'register' : 'login';
   const isRegister = state.authMode === 'register';
+  $('authModal').classList.toggle('is-registering', isRegister);
+  $('authModal').classList.toggle('is-login', !isRegister);
   $('authTitle').textContent = isRegister ? '注册账号' : '登录';
-  $('authIntro').textContent = isRegister ? '注册需要填写用户名、账号和密码。' : '登录后展示用户名和钱包余额。';
+  const defaultIntro = isRegister ? '创建账号后会自动进入工作台。' : '登录后继续创作，并同步余额和历史记录。';
+  const contextualIntro = authReasonText
+    ? (isRegister
+      ? authReasonText.replace('登录后', '注册后').replace('登录管理员账号后', '管理后台需要管理员账号，请返回登录')
+      : authReasonText)
+    : '';
+  $('authIntro').textContent = contextualIntro || defaultIntro;
+  const heroTitle = document.querySelector('#authModal .login-hero-pill');
+  if (heroTitle) heroTitle.textContent = isRegister ? '注册有鱼生图' : '登录有鱼生图';
   $('displayNameField').classList.toggle('visible', isRegister);
   $('loginBtn').textContent = isRegister ? '返回登录' : '登录';
   $('registerBtn').textContent = isRegister ? '提交注册' : '注册账号';
   $('password').setAttribute('autocomplete', isRegister ? 'new-password' : 'current-password');
+  $('account').placeholder = isRegister ? '字母、数字、点、横线或下划线' : '输入账号';
+  $('password').placeholder = isRegister ? '至少 6 位，建议包含字母和数字' : '至少 6 位';
   if (!isRegister) $('displayName').value = '';
   setAuthStatus('');
 }
 
 function openRechargeModal(options = {}) {
   if (!state.user) {
-    openAuthModal();
+    state.pendingAuthAction = { type: 'recharge', options };
+    openAuthModal({ reason: 'recharge' });
     return setStatus('请先登录后再充值。', true);
   }
   renderRechargeModal(options);
@@ -3862,6 +4125,7 @@ function openRechargeModal(options = {}) {
 
 function closeRechargeModal() {
   state.communityTipResume = null;
+  state.pendingGenerationAfterRecharge = null;
   $('rechargeModal').classList.remove('open');
   $('rechargeModal').setAttribute('aria-hidden', 'true');
   syncModalState();
@@ -3896,16 +4160,21 @@ function syncModalState() {
 function renderRechargeModal(options = {}) {
   const isAdmin = state.user?.role === 'admin';
   const resumeTip = state.communityTipResume;
+  const resumeGeneration = state.pendingGenerationAfterRecharge;
   document.querySelector('.recharge-dialog')?.classList.toggle('user-recharge', !isAdmin);
   $('rechargeIntro').textContent = isAdmin
     ? '管理员可生成兑换码，也可以直接测试兑换。'
     : resumeTip
       ? `你刚才选择的自愿支持金额超过当前余额；下载不受影响，兑换后会回到 ${yuan(resumeTip.amountCents)} 确认弹窗。`
+      : resumeGeneration
+        ? '刚才的生成任务余额不足，参数和参考图已暂存；兑换成功后会自动继续生成。'
       : '购买兑换码后回到这里输入，余额会自动到账。';
   $('rechargeNote').textContent = isAdmin
     ? `已选择 ${yuan(state.rechargeAmount * 100)}，可生成一个新兑换码。`
     : options.reason === 'tip' && resumeTip
       ? '下载不受影响；充值不会自动支持作者，兑换后仍需再次确认。'
+      : (options.reason === 'generate' || resumeGeneration)
+        ? '兑换成功后无需手动再点生成，系统会继续刚才的生图任务。'
       : '请先点击购买兑换码，拿到兑换码后填入下方输入框。';
   const rechargeGrid = document.querySelector('.recharge-grid');
   if (rechargeGrid) {
@@ -3914,13 +4183,20 @@ function renderRechargeModal(options = {}) {
   }
   const purchaseLink = $('purchaseCodeLink');
   const purchaseHelper = $('purchaseHelper');
+  const hasPurchaseUrl = Boolean(state.purchaseCodeUrl);
   if (purchaseLink) {
-    purchaseLink.style.display = isAdmin ? 'none' : 'flex';
-    purchaseLink.setAttribute('aria-hidden', String(isAdmin));
+    purchaseLink.style.display = (!isAdmin && hasPurchaseUrl) ? 'flex' : 'none';
+    purchaseLink.setAttribute('aria-hidden', String(isAdmin || !hasPurchaseUrl));
+    purchaseLink.href = hasPurchaseUrl ? state.purchaseCodeUrl : '#';
   }
   if (purchaseHelper) {
     purchaseHelper.style.display = isAdmin ? 'none' : 'block';
     purchaseHelper.setAttribute('aria-hidden', String(isAdmin));
+    if (!isAdmin && !hasPurchaseUrl) {
+      purchaseHelper.textContent = '管理员暂未配置购买渠道，请联系管理员获取兑换码。';
+    } else if (!isAdmin) {
+      purchaseHelper.textContent = '购买后会拿到兑换码，复制到这里即可到账。';
+    }
   }
   $('adminCreateCodeBtn').style.display = isAdmin ? 'inline-flex' : 'none';
   document.querySelectorAll('.recharge-plan').forEach((button) => {
@@ -3952,7 +4228,8 @@ async function redeemCurrentCode() {
     $('rechargeNote').textContent = `兑换成功，到账 ${yuan(data.amountCents)}。`;
     setStatus(`兑换成功，当前余额 ${yuan(state.user.balanceCents)}。`);
     await renderAll();
-    await resumeCommunityTipAfterRecharge();
+    const resumedTip = await resumeCommunityTipAfterRecharge();
+    if (!resumedTip) resumeGenerationAfterRecharge();
   } catch (error) {
     $('rechargeNote').textContent = error.message;
     $('rechargeNote').classList.add('error-text');
@@ -3964,7 +4241,7 @@ async function redeemCurrentCode() {
 
 async function resumeCommunityTipAfterRecharge() {
   const resume = state.communityTipResume;
-  if (!resume?.postId) return;
+  if (!resume?.postId) return false;
   const amountSingularity = Math.max(0.1, Number(resume.amountCents || 0) / 100);
   state.communityTipResume = null;
   $('rechargeModal')?.classList.remove('open');
@@ -3977,13 +4254,115 @@ async function resumeCommunityTipAfterRecharge() {
       post = data.post;
       if (post) state.communityDetailPost = post;
     }
-    if (!post) return setStatus('充值成功，但原作品暂时找不到了。', true);
+    if (!post) {
+      setStatus('充值成功，但原作品暂时找不到了。', true);
+      return true;
+    }
     openCommunityTipModal(post);
     if ($('communityTipAmount')) $('communityTipAmount').value = String(amountSingularity);
     setCommunityTipStatus('余额已到账，请再次确认是否自愿支持作者。');
+    return true;
   } catch (error) {
     setStatus(`充值成功，但恢复自愿支持失败：${error.message}`, true);
+    return true;
   }
+}
+
+function isInsufficientBalanceError(error) {
+  const text = [
+    error?.status,
+    error?.message,
+    error?.payload?.message,
+    error?.payload?.generation?.error
+  ].filter(Boolean).join(' ');
+  return /余额不足|额度不足|奇点不足|insufficient|balance|402/i.test(text);
+}
+
+function createPendingGenerationAfterRecharge({ prompt, reusePostId = '', reuseIntentToken = '' } = {}) {
+  syncActiveReference();
+  return {
+    prompt: String(prompt || $('prompt')?.value || state.prompts[state.mode] || ''),
+    prompts: { ...state.prompts },
+    mode: state.mode,
+    quality: state.quality,
+    size: state.size,
+    model: state.imageModel,
+    outputFormat: state.outputFormat,
+    count: state.count,
+    layout: state.layout,
+    storyboardText: state.storyboardText,
+    storyboardScenes: [...state.storyboardScenes],
+    sourceImages: state.sourceImages.map((item) => ({
+      id: item.id,
+      dataUrl: item.dataUrl,
+      maskDataUrl: item.maskDataUrl || '',
+      label: item.label || '参考图'
+    })),
+    activeSourceId: state.activeSourceId,
+    reusePostId,
+    reuseIntentToken,
+    statusText: '余额已到账，正在继续刚才的生成任务…'
+  };
+}
+
+function restorePendingGenerationAfterRecharge(resume) {
+  if (!resume) return false;
+  preferredStudioRoute = '/image/workspace';
+  switchPanel('studio', { path: '/image/workspace' });
+  state.prompts = {
+    ...state.prompts,
+    ...(resume.prompts || {}),
+    [resume.mode === 'edit' ? 'edit' : 'generate']: String(resume.prompt || '')
+  };
+  state.sourceImages = Array.isArray(resume.sourceImages)
+    ? resume.sourceImages.map((item, index) => ({
+      id: item.id || `resume-source-${index + 1}`,
+      dataUrl: item.dataUrl || '',
+      maskDataUrl: item.maskDataUrl || '',
+      label: item.label || `参考图 ${index + 1}`
+    })).filter((item) => item.dataUrl)
+    : [];
+  state.activeSourceId = state.sourceImages.some((item) => item.id === resume.activeSourceId)
+    ? resume.activeSourceId
+    : state.sourceImages[0]?.id || '';
+  state.storyboardText = resume.storyboardText || '';
+  state.storyboardScenes = Array.isArray(resume.storyboardScenes) ? [...resume.storyboardScenes] : [];
+  state.communityReusePendingPostId = resume.reusePostId || '';
+  state.communityReusePendingToken = resume.reuseIntentToken || '';
+  setQuality(resume.quality);
+  setSize(resume.size);
+  setImageModel(resume.model || resume.imageModel);
+  setOutputFormat(resume.outputFormat);
+  setCount(resume.count);
+  setLayout(resume.layout);
+  syncActiveReference();
+  setMode(resume.mode === 'edit' && state.sourceImages.length ? 'edit' : 'generate');
+  const prompt = $('prompt');
+  if (prompt) {
+    prompt.value = String(resume.prompt || '');
+    state.prompts[state.mode] = prompt.value;
+  }
+  renderReferencePreview();
+  updatePromptCount();
+  updateComposerPromptState();
+  if (state.communityReusePendingPostId) renderCommunityReuseSourceBar();
+  else clearCommunityReuseSource();
+  cueComposerFocus({ focusGenerate: true });
+  return true;
+}
+
+function resumeGenerationAfterRecharge() {
+  const resume = state.pendingGenerationAfterRecharge;
+  if (!resume) return false;
+  state.pendingGenerationAfterRecharge = null;
+  $('rechargeModal')?.classList.remove('open');
+  $('rechargeModal')?.setAttribute('aria-hidden', 'true');
+  syncModalState();
+  restorePendingGenerationAfterRecharge(resume);
+  setStatus('余额已到账，正在继续刚才的生成任务。');
+  submitGeneration(resume.statusText || '余额已到账，正在继续生成…')
+    .catch((error) => setStatus(error.message, true));
+  return true;
 }
 
 async function createAdminRedeemCode() {
@@ -4061,27 +4440,63 @@ function renderAccount() {
 }
 
 function renderPrice() {
-  const text = selectedPriceText();
-  const node = $('priceHint');
-  if (node) {
-    node.textContent = selectedPriceCompactText();
-    node.title = text;
-  }
-  if ($('walletChipBtn')) $('walletChipBtn').textContent = '';
+  renderImageModelOptions();
   renderSpecLabels();
   document.querySelectorAll('[data-size]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.size === state.size);
+    const active = button.dataset.size === state.size;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
   });
   document.querySelectorAll('[data-quality]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.quality === state.quality);
+    const active = button.dataset.quality === state.quality;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
   });
   document.querySelectorAll('[data-format]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.format === state.outputFormat);
+    const active = button.dataset.format === state.outputFormat;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
   });
   document.querySelectorAll('[data-count]').forEach((button) => {
-    button.classList.toggle('active', Number(button.dataset.count) === state.count);
+    const active = Number(button.dataset.count) === state.count;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-model]').forEach((button) => {
+    const active = String(button.dataset.model || '') === state.imageModel;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
   });
   syncPreviewMeta();
+}
+
+function normalizeImageModels(models) {
+  return [...new Set((Array.isArray(models) ? models : [])
+    .map((model) => String(model || '').trim())
+    .filter(Boolean))];
+}
+
+function syncImageModelSelection() {
+  state.imageModels = normalizeImageModels(state.imageModels);
+  if (state.imageModel && !state.imageModels.includes(state.imageModel)) state.imageModel = '';
+}
+
+function renderImageModelOptions() {
+  const menu = $('modelMenu');
+  if (!menu) return;
+  syncImageModelSelection();
+  if (!state.imageModels.length) {
+    menu.innerHTML = '<button class="active" data-model="" type="button" role="option" aria-selected="true" disabled>未配置模型</button>';
+    return;
+  }
+  menu.innerHTML = [
+    `<button class="${state.imageModel ? '' : 'active'}" data-model="" type="button" role="option" aria-selected="${state.imageModel ? 'false' : 'true'}">自动调度</button>`,
+    ...state.imageModels.map((model) => `
+    <button class="${model === state.imageModel ? 'active' : ''}" data-model="${escapeHtml(model)}" type="button" role="option" aria-selected="${model === state.imageModel ? 'true' : 'false'}" title="${escapeHtml(model)}">
+      ${escapeHtml(imageModelLabel(model))}
+    </button>
+  `)
+  ].join('');
 }
 
 function resetComposer() {
@@ -4149,6 +4564,7 @@ async function logout() {
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } finally {
+    resetStudioSessionStateForUser(null);
     state.user = null;
     state.apiKeys = [];
     state.apiNewKey = '';
@@ -4170,10 +4586,17 @@ async function logout() {
 async function loadMe() {
   try {
     const data = await api('/api/me');
+    resetStudioSessionStateForUser(data.user);
+    resetCommunitySessionStateForUser(data.user);
     state.user = data.user;
     loadCreatorFeedbackHandledIds();
     state.prices = data.prices || state.prices;
+    state.imageModels = normalizeImageModels(data.imageModels);
+    syncImageModelSelection();
+    if (data.billing?.purchaseCodeUrl !== undefined) state.purchaseCodeUrl = data.billing.purchaseCodeUrl || '';
   } catch (error) {
+    resetStudioSessionStateForUser(null);
+    resetCommunitySessionStateForUser(null);
     state.user = null;
     state.creatorFeedbackHandledIds = [];
     clearCreatorFeedbackSummaryCache();
@@ -4182,6 +4605,8 @@ async function loadMe() {
     sanitizeCommunityStateForViewer();
     state.apiKeys = [];
     state.apiNewKey = '';
+    state.imageModels = [];
+    syncImageModelSelection();
     if (error.message !== '请先登录') {
       setStatus(`账号状态读取失败：${error.message}`, true);
     }
@@ -4209,8 +4634,27 @@ async function loadAdmin() {
     if (state.adminActiveTab === 'redeem') await loadAdminRedeemCodes({ silent: true });
     if (state.adminActiveTab === 'generationLogs') await loadAdminGenerationLogs({ silent: true });
   } catch (error) {
-    setStatus(`管理员数据读取失败：${error.message}`, true);
+    setAdminStatus(`管理员数据读取失败：${error.message}`, true);
   }
+}
+
+function closeHistoryPanel() {
+  document.body.classList.remove('history-mobile-open', 'history-opened');
+  document.body.classList.add('history-collapsed');
+  if (state.activePanel === 'studio') pushStudioHistoryRoute(false);
+  normalizeHistoryLayoutState();
+}
+
+function setAdminStatus(message, isError = false) {
+  const text = String(message || '');
+  const node = $('adminConsoleStatus');
+  if (node) {
+    node.hidden = !text;
+    node.textContent = text;
+    node.classList.toggle('error-text', Boolean(isError));
+    node.classList.toggle('success-text', Boolean(text && !isError));
+  }
+  setStatus(text, isError);
 }
 
 function renderAdminUpstream(ai = state.adminAiSettings) {
@@ -4224,6 +4668,10 @@ function renderAdminUpstream(ai = state.adminAiSettings) {
   fill('adminTextUpstreamBaseUrl', settings.textUpstreamBaseUrl || settings.upstreamBaseUrl);
   fill('adminTextModel', settings.textModel);
   if ($('adminTextUpstreamApiKey') && document.activeElement !== $('adminTextUpstreamApiKey')) $('adminTextUpstreamApiKey').value = '';
+  if ($('adminClearTextUpstreamApiKey')) {
+    $('adminClearTextUpstreamApiKey').checked = false;
+    $('adminClearTextUpstreamApiKey').disabled = !settings.textUpstreamApiKeyConfigured;
+  }
   if ($('adminUpstreamMeta')) {
     const upstreams = adminImageUpstreams(settings);
     const enabledCount = upstreams.filter((item) => item.enabled !== false && item.upstreamBaseUrl && item.imageModel && (item.upstreamApiKeyConfigured || item.upstreamApiKeyMasked)).length;
@@ -4320,6 +4768,7 @@ function collectAdminImageUpstreams() {
       name: field('name')?.value || `生图通道 ${index + 1}`,
       upstreamBaseUrl: field('upstreamBaseUrl')?.value || '',
       upstreamApiKey: field('upstreamApiKey')?.value || '',
+      clearUpstreamApiKey: Boolean(field('clearUpstreamApiKey')?.checked),
       upstreamApiKeyConfigured: Boolean(existing.upstreamApiKeyConfigured),
       upstreamApiKeyMasked: existing.upstreamApiKeyMasked || '',
       imageModel: field('imageModel')?.value || '',
@@ -4337,6 +4786,7 @@ async function saveAdminUpstream() {
     imageUpstreams: collectAdminImageUpstreams(),
     textUpstreamBaseUrl: $('adminTextUpstreamBaseUrl')?.value || '',
     textUpstreamApiKey: $('adminTextUpstreamApiKey')?.value || '',
+    clearTextUpstreamApiKey: Boolean($('adminClearTextUpstreamApiKey')?.checked),
     textModel: $('adminTextModel')?.value || ''
   };
   state.upstreamSavePending = true;
@@ -4347,11 +4797,16 @@ async function saveAdminUpstream() {
       body: payload
     });
     state.adminAiSettings = data.ai || state.adminAiSettings;
+    if (data.imageModels) {
+      state.imageModels = normalizeImageModels(data.imageModels);
+      syncImageModelSelection();
+    }
     renderAdminUpstream(state.adminAiSettings);
+    renderPrice();
     await refreshHealth();
-    setStatus('上游配置已保存，后续生图和文本请求会分别使用新配置。');
+    setAdminStatus('上游配置已保存，模型列表已从上游同步。');
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   } finally {
     state.upstreamSavePending = false;
     renderAdminUpstream();
@@ -4362,8 +4817,10 @@ function renderAdminBilling(billing = null) {
   const prices = billing?.prices || state.prices;
   const price1k = Number(prices?.['1k'] || 0) / 100;
   const price2k = Number(prices?.['2k'] || 0) / 100;
+  if (billing?.purchaseCodeUrl !== undefined) state.purchaseCodeUrl = billing.purchaseCodeUrl || '';
   if ($('adminPrice1k') && document.activeElement !== $('adminPrice1k')) $('adminPrice1k').value = price1k ? String(price1k) : '';
   if ($('adminPrice2k') && document.activeElement !== $('adminPrice2k')) $('adminPrice2k').value = price2k ? String(price2k) : '';
+  if ($('adminPurchaseCodeUrl') && document.activeElement !== $('adminPurchaseCodeUrl')) $('adminPurchaseCodeUrl').value = state.purchaseCodeUrl || '';
   if ($('adminBillingMeta')) {
     const updatedAt = billing?.updatedAt ? ` · ${formatDate(billing.updatedAt)}` : '';
     $('adminBillingMeta').textContent = `当前 ${yuan(prices?.['1k'] || 0)} / ${yuan(prices?.['2k'] || 0)}${updatedAt}`;
@@ -4378,19 +4835,21 @@ async function saveAdminBilling() {
   if (state.billingSavePending) return;
   const price1kCents = Math.round(Number($('adminPrice1k')?.value || 0) * 100);
   const price2kCents = Math.round(Number($('adminPrice2k')?.value || 0) * 100);
+  const purchaseCodeUrl = $('adminPurchaseCodeUrl')?.value.trim() || '';
   state.billingSavePending = true;
   renderAdminBilling();
   try {
     const data = await api('/api/admin/billing', {
       method: 'PUT',
-      body: { prices: { '1k': price1kCents, '2k': price2kCents } }
+      body: { prices: { '1k': price1kCents, '2k': price2kCents }, purchaseCodeUrl }
     });
     state.prices = data.prices || data.billing?.prices || state.prices;
+    if (data.billing?.purchaseCodeUrl !== undefined) state.purchaseCodeUrl = data.billing.purchaseCodeUrl || '';
     renderAdminBilling(data.billing);
     renderPrice();
-    setStatus(`计费已更新：标准 ${yuan(state.prices['1k'])} / 高质量 ${yuan(state.prices['2k'])}。`);
+    setAdminStatus(`计费已更新：标准 ${yuan(state.prices['1k'])} / 高质量 ${yuan(state.prices['2k'])}。`);
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   } finally {
     state.billingSavePending = false;
     renderAdminBilling();
@@ -4458,6 +4917,25 @@ function renderAdminConsole({ force = false } = {}) {
   document.querySelectorAll('[data-admin-section]').forEach((section) => {
     section.classList.toggle('active', section.dataset.adminSection === state.adminActiveTab);
   });
+  const activeAdminTab = document.querySelector('#adminConsoleNav [data-admin-tab].active');
+  if (activeAdminTab && window.matchMedia('(max-width: 960px)').matches) {
+    requestAnimationFrame(() => {
+      scrollIntoViewSafe(activeAdminTab, { block: 'nearest', inline: 'center' });
+    });
+  }
+}
+
+function setAdminActiveTab(tab, { updateUrl = true } = {}) {
+  state.adminActiveTab = ['overview', 'billing', 'upstream', 'generationLogs', 'redeem', 'users', 'community'].includes(tab) ? tab : 'overview';
+  renderAdminConsole();
+  if (updateUrl && state.activePanel === 'admin') {
+    const nextPath = adminPathFromTab(state.adminActiveTab);
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ panel: 'admin', adminTab: state.adminActiveTab }, '', nextPath);
+    }
+  }
+  if (state.adminActiveTab === 'generationLogs') loadAdminGenerationLogs().catch((error) => setAdminStatus(`生图日志读取失败：${error.message}`, true));
+  if (state.adminActiveTab === 'redeem') loadAdminRedeemCodes().catch((error) => setAdminStatus(`卡密读取失败：${error.message}`, true));
 }
 
 function syncAdminVisibility() {
@@ -4510,7 +4988,7 @@ async function loadAdminGenerationLogs({ silent = false } = {}) {
     state.adminGenerationLogPage = Number(data.page || state.adminGenerationLogPage || 1);
     state.adminGenerationLogLimit = Number(data.limit || state.adminGenerationLogLimit || 50);
   } catch (error) {
-    if (!silent) setStatus(`生图日志读取失败：${error.message}`, true);
+    if (!silent) setAdminStatus(`生图日志读取失败：${error.message}`, true);
     state.adminGenerationLogs = [];
     state.adminGenerationLogStats = null;
     state.adminGenerationLogTotal = 0;
@@ -4584,7 +5062,7 @@ async function loadAdminRedeemCodes({ silent = false } = {}) {
     const pageIds = new Set(state.adminRedeemCodes.filter((item) => item.status === 'active').map((item) => item.id));
     state.adminRedeemSelectedIds = state.adminRedeemSelectedIds.filter((id) => pageIds.has(id));
   } catch (error) {
-    if (!silent) setStatus(`卡密读取失败：${error.message}`, true);
+    if (!silent) setAdminStatus(`卡密读取失败：${error.message}`, true);
     state.adminRedeemCodes = [];
     state.adminRedeemStats = null;
     state.adminRedeemTotal = 0;
@@ -4631,17 +5109,17 @@ function downloadTextFile(filename, text, type = 'text/plain;charset=utf-8') {
 
 async function downloadAdminRedeemExport(kind = 'filtered') {
   if (kind === 'created') {
-    if (!state.adminRedeemLastCreated.length) return setStatus('本次还没有新生成的兑换码。', true);
+    if (!state.adminRedeemLastCreated.length) return setAdminStatus('本次还没有新生成的兑换码。', true);
     downloadTextFile(`本次生成兑换码-${Date.now()}.csv`, adminRedeemCsv(state.adminRedeemLastCreated), 'text/csv;charset=utf-8');
-    setStatus(`已下载本次生成的 ${state.adminRedeemLastCreated.length} 张兑换码。`);
+    setAdminStatus(`已下载本次生成的 ${state.adminRedeemLastCreated.length} 张兑换码。`);
     return;
   }
   if (kind === 'selected') {
-    if (!state.adminRedeemSelectedIds.length) return setStatus('请先勾选要下载的卡密。', true);
+    if (!state.adminRedeemSelectedIds.length) return setAdminStatus('请先勾选要下载的卡密。', true);
     const selected = state.adminRedeemCodes.filter((item) => state.adminRedeemSelectedIds.includes(item.id));
-    if (!selected.length) return setStatus('当前页没有可下载的选中卡密。', true);
+    if (!selected.length) return setAdminStatus('当前页没有可下载的选中卡密。', true);
     downloadTextFile(`选中兑换码-${Date.now()}.csv`, adminRedeemCsv(selected), 'text/csv;charset=utf-8');
-    setStatus(`已下载 ${selected.length} 张选中卡密。`);
+    setAdminStatus(`已下载 ${selected.length} 张选中卡密。`);
     return;
   }
   const response = await fetch(`/api/admin/redeem-codes/export?${adminRedeemParams({ includePage: false })}`, { cache: 'no-store' });
@@ -4655,7 +5133,7 @@ async function downloadAdminRedeemExport(kind = 'filtered') {
   }
   const text = await response.text();
   downloadTextFile(`兑换码筛选结果-${Date.now()}.csv`, text, 'text/csv;charset=utf-8');
-  setStatus('已下载当前筛选条件下的全部兑换码。');
+  setAdminStatus('已下载当前筛选条件下的全部兑换码。');
 }
 
 function renderAdminRedeemCodes(codes = state.adminRedeemCodes) {
@@ -4755,17 +5233,17 @@ async function createAdminRedeemCodeFromPanel() {
         : [];
     state.adminRedeemLastCreated = created;
     if (created.length > 1) {
-      setStatus(`已批量生成 ${created.length} 张 ${yuan(created[0].amountCents)} 兑换卡密，可点“下载本次生成”；旧卡密仍在列表分页和筛选导出里。`);
+      setAdminStatus(`已批量生成 ${created.length} 张 ${yuan(created[0].amountCents)} 兑换卡密，可点“下载本次生成”；旧卡密仍在列表分页和筛选导出里。`);
     } else if (created.length) {
-      setStatus(`已生成 ${yuan(created[0].amountCents)} 卡密：${created[0].code}。旧卡密仍在列表分页和筛选导出里。`);
+      setAdminStatus(`已生成 ${yuan(created[0].amountCents)} 卡密：${created[0].code}。旧卡密仍在列表分页和筛选导出里。`);
     } else {
-      setStatus('卡密已生成。');
+      setAdminStatus('卡密已生成。');
     }
     state.adminRedeemPending = false;
     state.adminRedeemPage = 1;
     await loadAdminRedeemCodes();
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   } finally {
     state.adminRedeemPending = false;
     if ($('adminCreateRedeemBtn')) {
@@ -4787,28 +5265,36 @@ function toggleAdminRedeemSelection(id, checked) {
 
 async function copyAdminRedeemCodes() {
   const pageCodes = state.adminRedeemCodes || [];
-  if (!pageCodes.length) return setStatus('当前页没有可复制的兑换码。', true);
+  if (!pageCodes.length) return setAdminStatus('当前页没有可复制的兑换码。', true);
   const text = pageCodes.map((item) => `${item.code} ${yuan(item.amountCents)} ${redeemStatusText(item.status)}`).join('\n');
   try {
     await navigator.clipboard.writeText(text);
-    setStatus(`已复制当前页 ${pageCodes.length} 条兑换码。`);
+    setAdminStatus(`已复制当前页 ${pageCodes.length} 条兑换码。`);
   } catch {
-    setStatus('复制失败，请检查浏览器剪贴板权限。', true);
+    setAdminStatus('复制失败，请检查浏览器剪贴板权限。', true);
   }
 }
 
 async function batchRevokeAdminRedeemCodes() {
-  if (!state.adminRedeemSelectedIds.length) return setStatus('请先勾选要撤销的未使用卡密。', true);
+  if (!state.adminRedeemSelectedIds.length) return setAdminStatus('请先勾选要撤销的未使用卡密。', true);
+  const selectedSet = new Set(state.adminRedeemSelectedIds);
+  const selectedCodes = (state.adminRedeemCodes || []).filter((item) => selectedSet.has(item.id));
+  const amountCents = selectedCodes.reduce((sum, item) => sum + Number(item.amountCents || 0), 0);
+  const message = `确认撤销 ${state.adminRedeemSelectedIds.length} 张未使用卡密？${amountCents ? `\n合计面额：${yuan(amountCents)}` : ''}\n撤销后这些卡密将不能再兑换。`;
+  if (!window.confirm(message)) {
+    setAdminStatus('已取消批量撤销。');
+    return;
+  }
   try {
     const data = await api('/api/admin/redeem-codes/revoke-batch', {
       method: 'POST',
       body: { codeIds: state.adminRedeemSelectedIds }
     });
     state.adminRedeemSelectedIds = [];
-    setStatus(`已批量撤销 ${data.count} 张兑换卡密。`);
+    setAdminStatus(`已批量撤销 ${data.count} 张兑换卡密。`);
     await loadAdminRedeemCodes();
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   }
 }
 
@@ -4826,10 +5312,10 @@ async function revokeAdminRedeemCode(id, button) {
   button.disabled = true;
   try {
     await api(`/api/admin/redeem-codes/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    setStatus('兑换卡密已撤销。');
+    setAdminStatus('兑换卡密已撤销。');
     await loadAdminRedeemCodes();
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   }
 }
 
@@ -4853,11 +5339,11 @@ async function createAdminUser() {
     ['adminNewAccount', 'adminNewUsername', 'adminNewPassword', 'adminNewBalance'].forEach((id) => {
       if ($(id)) $(id).value = '';
     });
-    setStatus(`已新增用户 ${data.user.username}。`);
+    setAdminStatus(`已新增用户 ${data.user.username}。`);
     state.adminUserPending = false;
     await loadAdmin();
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   } finally {
     state.adminUserPending = false;
     if ($('adminCreateUserBtn')) {
@@ -4875,23 +5361,28 @@ async function resetAdminUserPassword(userId) {
       method: 'POST',
       body: { password }
     });
-    setStatus('用户密码已重置，旧登录状态已失效。');
+    setAdminStatus('用户密码已重置，旧登录状态已失效。');
     await loadAdmin();
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   }
 }
 
-async function updateAdminUserStatus(userId, status) {
+async function updateAdminUserStatus(userId, status, userLabel = '') {
+  if (status === 'disabled') {
+    const name = String(userLabel || '该用户').trim() || '该用户';
+    const ok = window.confirm(`确认禁用 ${name}？禁用后该用户的登录状态和 API Key 会立即失效，后续生成提交会被拒绝。`);
+    if (!ok) return;
+  }
   try {
     const data = await api(`/api/admin/users/${encodeURIComponent(userId)}/status`, {
       method: 'PATCH',
       body: { status }
     });
-    setStatus(`${data.user.username} 已${status === 'active' ? '启用' : '禁用'}。`);
+    setAdminStatus(`${data.user.username} 已${status === 'active' ? '启用' : '禁用'}。`);
     await loadAdmin();
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   }
 }
 
@@ -4908,10 +5399,10 @@ async function deleteAdminUser(userId, button) {
   button.disabled = true;
   try {
     await api(`/api/admin/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
-    setStatus('用户已软删除，历史记录和账单仍保留。');
+    setAdminStatus('用户已软删除，历史记录和账单仍保留。');
     await loadAdmin();
   } catch (error) {
-    setStatus(error.message, true);
+    setAdminStatus(error.message, true);
   }
 }
 
@@ -4937,12 +5428,17 @@ async function renderAll() {
   updatePromptCount();
   renderCommunityReuseSourceBar();
   if (state.activePanel === 'studio') {
+    if (state.previewState === 'empty' && !state.previewItem) renderPreviewEmpty();
     try {
       await loadHistory();
+      scheduleAutoResumePendingGeneration();
     } catch (error) {
       state.historyItems = [];
       state.historyTotal = 0;
       state.historyDeletableCount = 0;
+      state.historyNextOffset = 0;
+      state.historyHasMore = false;
+      state.historyLoadingMore = false;
       if ($('history')) $('history').innerHTML = `<p class="history-empty-copy error-text">历史读取失败：${escapeHtml(error.message)}</p>`;
       if ($('historyHint')) $('historyHint').textContent = '!';
       setStatus('历史读取失败，但不影响当前生成结果。', true);
@@ -4986,6 +5482,14 @@ function setSize(size) {
   renderPrice();
 }
 
+function setImageModel(model) {
+  const value = String(model || '').trim();
+  state.imageModel = state.imageModels.length && !state.imageModels.includes(value)
+    ? ''
+    : value;
+  renderPrice();
+}
+
 function setOutputFormat(format) {
   state.outputFormat = ['jpeg', 'png', 'webp'].includes(format) ? format : 'jpeg';
   renderPrice();
@@ -5013,6 +5517,7 @@ async function handleLogin() {
     method: 'POST',
     body: { account, password }
   });
+  resetStudioSessionStateForUser(data.user);
   resetCommunitySessionStateForUser(data.user);
   state.user = data.user;
   loadCreatorFeedbackHandledIds();
@@ -5027,14 +5532,15 @@ async function handleLogin() {
 }
 
 async function handleRegister() {
-  const username = $('displayName').value.trim();
   const account = $('account').value.trim();
+  const username = $('displayName').value.trim() || account;
   const password = $('password').value;
-  if (!username || !account || !password) throw new Error('请输入用户名、账号和密码');
+  if (!account || !password) throw new Error('请输入账号和密码');
   const data = await api('/api/auth/register', {
     method: 'POST',
     body: { username, account, password }
   });
+  resetStudioSessionStateForUser(data.user);
   resetCommunitySessionStateForUser(data.user);
   state.user = data.user;
   loadCreatorFeedbackHandledIds();
@@ -5086,6 +5592,9 @@ async function submitGeneration(statusText = '请求已提交。') {
   if (!state.user) {
     return requireLoginForAction('generate', { statusText: '登录成功，正在继续生成…' }, '请先登录后再生成。');
   }
+  if (state.imageReady === false) {
+    return setStatus('图像通道未配置，请联系管理员设置上游地址和密钥。', true);
+  }
   saveCurrentPrompt();
   applyModeFromSources();
   saveCurrentPrompt();
@@ -5107,10 +5616,20 @@ async function submitGeneration(statusText = '请求已提交。') {
   const reusePostId = state.communityReusePendingPostId || '';
   const reuseIntentToken = reusePostId ? state.communityReusePendingToken || '' : '';
   const payload = buildGenerationPayload({ prompt, imageDataUrls, storyboardPrompts, reusePostId, reuseIntentToken });
+  const rechargeResume = createPendingGenerationAfterRecharge({ prompt, reusePostId, reuseIntentToken });
   const longTaskTimers = createLongGenerationTimers(submitSeq);
+  let queuedGenerationId = '';
+  let queuedGenerationSummary = null;
   try {
     const queuedData = await submitGenerationRequest(payload, { mode: state.mode });
     if (queuedData.generation?.id) {
+      queuedGenerationId = queuedData.generation.id;
+      queuedGenerationSummary = queuedData.generation;
+      if (queuedData.user) {
+        state.user = queuedData.user;
+        renderAccount();
+        renderPrice();
+      }
       renderGeneratingPreview(queuedData.generation);
       setStatus('任务已进入后台队列，可以继续提交下一张。');
       setPreviewMeta(queuedData.queue?.queued ? `排队中 · 队列 ${queuedData.queue.queued} 个任务` : '后台任务已创建');
@@ -5130,7 +5649,9 @@ async function submitGeneration(statusText = '请求已提交。') {
     const item = mergeReusePostIntoGeneration(data);
     if (!isCurrentGenerationActivity(submitSeq)) {
       await loadHistory();
-      setStatus('一张图片已生成完成，已放入历史记录。');
+      setStatus(item?.status === 'succeeded' || item?.status === 'failed'
+        ? '上一张任务已更新到历史记录。'
+        : '上一张任务仍在后台生成，可以从历史继续查看。');
       return;
     }
     $('preview').classList.remove('loading');
@@ -5141,17 +5662,30 @@ async function submitGeneration(statusText = '请求已提交。') {
       await loadHistory();
       return;
     }
-    setStatus(`生成成功，已扣费 ${yuan(item.priceCents)}。`);
+    const refundedAmountCents = Number(item.refundedAmountCents || 0);
+    const chargedAmountCents = Number(item.remainingAmountCents ?? item.priceCents ?? 0);
+    setStatus(refundedAmountCents > 0
+      ? `生成成功，已退 ${yuan(refundedAmountCents)}，实扣 ${yuan(chargedAmountCents)}。`
+      : `生成成功，已扣费 ${yuan(chargedAmountCents)}。`);
     await renderAll();
     showGenerationInPreview(item);
     setPreviewMeta(generationPreviewMeta(item, state.count));
   } catch (error) {
     if (error.status === 401) {
-      requireLoginAfterExpired({ type: 'generate', statusText: '登录成功，正在继续生成…' });
+      requireLoginAfterExpired(queuedGenerationId
+        ? { type: 'resumeGeneration', generationId: queuedGenerationId, summary: queuedGenerationSummary }
+        : { type: 'generate', statusText: '登录成功，正在继续生成…' });
       setStatus('登录状态已过期，请重新登录后继续生成。', true);
       return;
     }
     if (!isCurrentGenerationActivity(submitSeq)) {
+      await loadHistory();
+      return;
+    }
+    if (error.generationStillPending) {
+      if (queuedGenerationSummary) renderGeneratingPreview(queuedGenerationSummary);
+      setPreviewMeta('生成中 · 状态读取暂时中断');
+      setStatus(error.message || '生成任务仍在后台执行，可以从历史记录继续查看。');
       await loadHistory();
       return;
     }
@@ -5162,6 +5696,10 @@ async function submitGeneration(statusText = '请求已提交。') {
     }
     const failedGeneration = error.payload?.generation;
     const failedMessage = friendlyGenerateError(failedGeneration?.error || error.message);
+    if (isInsufficientBalanceError(error)) {
+      state.pendingGenerationAfterRecharge = rechargeResume;
+      openRechargeModal({ reason: 'generate' });
+    }
     renderFailedGeneration(failedGeneration, failedMessage);
     setStatus(failedMessage, true);
     await loadHistory();
@@ -5188,7 +5726,9 @@ function bindEvents() {
   };
   document.querySelector('[data-panel-target="studio"]').onclick = openStudioHome;
   $('railBrandHome').onclick = openStudioHome;
-  $('themeToggleBtn').onclick = toggleTheme;
+  $('themeToggleBtn').onclick = () => {
+    window.location.href = '/';
+  };
   $('promptLibraryNavBtn').onclick = () => switchPanel('prompts');
   $('agentNavBtn').onclick = () => switchPanel('agent');
   $('apiDocsNavBtn').onclick = () => switchPanel('developers');
@@ -5230,48 +5770,82 @@ function bindEvents() {
   };
   $('newSessionBtn').onclick = resetComposer;
   bindHistoryControls();
+  $('historyCloseBtn')?.addEventListener('click', closeHistoryPanel);
+  $('historyBackdrop')?.addEventListener('click', closeHistoryPanel);
   $('collapseHistoryBtn').onclick = () => {
     closePillMenus();
     if (state.activePanel !== 'studio') {
       switchPanel('studio', { path: preferredStudioRoute || '/image/history' });
-      if (window.matchMedia('(max-width: 1180px)').matches) {
+      if (window.matchMedia(studioCompactMediaQuery).matches) {
         document.body.classList.add('history-mobile-open');
       } else {
         document.body.classList.add('history-opened');
         document.body.classList.remove('history-collapsed');
       }
+      pushStudioHistoryRoute(true);
       normalizeHistoryLayoutState();
+      scheduleAutoResumePendingGeneration();
       return;
     }
-    if (window.matchMedia('(max-width: 1180px)').matches) {
-      document.body.classList.toggle('history-mobile-open');
+    if (window.matchMedia(studioCompactMediaQuery).matches) {
+      const nextOpen = !document.body.classList.contains('history-mobile-open');
+      document.body.classList.toggle('history-mobile-open', nextOpen);
+      pushStudioHistoryRoute(nextOpen);
     } else {
-      document.body.classList.toggle('history-opened');
-      document.body.classList.toggle('history-collapsed', !document.body.classList.contains('history-opened'));
+      const nextOpen = !document.body.classList.contains('history-opened');
+      document.body.classList.toggle('history-opened', nextOpen);
+      document.body.classList.toggle('history-collapsed', !nextOpen);
+      pushStudioHistoryRoute(nextOpen);
     }
     normalizeHistoryLayoutState();
+    scheduleAutoResumePendingGeneration();
   };
   document.querySelectorAll('.select-pill').forEach((pill) => {
-    pill.onclick = (event) => {
-      if (event.target.closest('.pill-menu button')) return;
+    const trigger = pill.querySelector('.select-pill-trigger');
+    if (!trigger) return;
+    const toggleMenu = () => {
       const shouldOpen = !pill.classList.contains('open');
-      closePillMenus();
-      pill.classList.toggle('open', shouldOpen);
+      if (shouldOpen) {
+        closePillMenus(pill);
+        pill.classList.add('open');
+        trigger.setAttribute('aria-expanded', 'true');
+      } else {
+        closePillMenus();
+      }
       $('create')?.classList.toggle('dropdown-open', shouldOpen);
       if (shouldOpen) activateFloatingPillMenu(pill);
+    };
+    trigger.onclick = (event) => {
+      event.preventDefault();
+      toggleMenu();
+    };
+    trigger.onkeydown = (event) => {
+      if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      event.preventDefault();
+      if (!pill.classList.contains('open')) toggleMenu();
     };
   });
   document.addEventListener('click', (event) => {
     if (!event.target.closest('.select-pill') && !event.target.closest('[data-floating-menu]')) closePillMenus();
+    if (
+      document.body.classList.contains('history-mobile-open')
+      && !event.target.closest('#historySection')
+      && !event.target.closest('#collapseHistoryBtn')
+    ) {
+      closeHistoryPanel();
+    }
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') closePillMenus();
+    if (event.key === 'Escape' && document.body.classList.contains('history-mobile-open')) closeHistoryPanel();
   });
   $('authCloseBtn').onclick = closeAuthModal;
   $('rechargeCloseBtn').onclick = closeRechargeModal;
   $('accountCloseBtn').onclick = closeAccountModal;
   bindSelectionMaskEvents();
-  $('authModal').onclick = null;
+  $('authModal').onclick = (event) => {
+    if (event.target === $('authModal')) closeAuthModal();
+  };
   $('rechargeModal').onclick = (event) => {
     if (event.target === $('rechargeModal')) closeRechargeModal();
   };
@@ -5281,6 +5855,9 @@ function bindEvents() {
   $('communityPublishCloseBtn').onclick = closeCommunityPublishModal;
   $('communityPublishCancelBtn').onclick = closeCommunityPublishModal;
   $('communityPublishSubmitBtn').onclick = submitCommunityPublish;
+  $('communityShowSourceImages')?.addEventListener('change', (event) => {
+    state.communityPublishShowSourceImages = Boolean(event.currentTarget.checked);
+  });
   $('communityPublishModal').onclick = (event) => {
     handleCommunityClick(event);
     if (event.target === $('communityPublishModal')) closeCommunityPublishModal();
@@ -5406,15 +5983,24 @@ function bindEvents() {
   $('communityCreateBtn').onclick = startCommunityCreation;
   $('promptLibraryPanel').addEventListener('click', handlePromptLibraryClick);
 window.addEventListener('popstate', () => {
-  switchPanel(panelFromPath(), { updateUrl: false });
+  const nextPanel = panelFromPath();
+  if (nextPanel === 'admin') state.adminActiveTab = adminTabFromPath();
+  switchPanel(nextPanel, { updateUrl: false, path: window.location.pathname });
   openLinkedCommunityPost();
 });
 
   $('loginBtn').onclick = () => runAuth('login');
   $('registerBtn').onclick = () => runAuth('register');
+  $('authForm')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    runAuth(state.authMode);
+  });
   ['displayName', 'account', 'password'].forEach((id) => {
     $(id).addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') runAuth(state.authMode);
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        runAuth(state.authMode);
+      }
     });
     $(id).addEventListener('input', () => setAuthStatus(''));
   });
@@ -5431,9 +6017,20 @@ window.addEventListener('popstate', () => {
   $('adminSaveBillingBtn').onclick = saveAdminBilling;
   $('adminSaveUpstreamBtn').onclick = saveAdminUpstream;
   $('adminAddImageUpstreamBtn').onclick = addAdminImageUpstream;
+  $('adminUpstreamForm')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    saveAdminUpstream();
+  });
+  $('adminCreateUserForm')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    createAdminUser();
+  });
   $('adminImageUpstreamList').addEventListener('click', (event) => {
     const removeButton = event.target.closest('[data-admin-remove-upstream]');
     if (removeButton) removeAdminImageUpstream(removeButton.dataset.adminRemoveUpstream);
+  });
+  $('adminImageUpstreamList').addEventListener('submit', (event) => {
+    event.preventDefault();
   });
   $('adminImageUpstreamList').addEventListener('change', (event) => {
     if (event.target?.dataset?.upstreamField === 'enabled') {
@@ -5472,6 +6069,12 @@ window.addEventListener('popstate', () => {
       closePillMenus();
     };
   });
+  $('modelMenu')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-model]');
+    if (!button || button.disabled) return;
+    setImageModel(button.dataset.model);
+    closePillMenus();
+  });
   $('modeTabs')?.querySelectorAll('button').forEach((button) => {
     button.onclick = () => setMode(button.dataset.mode);
   });
@@ -5500,29 +6103,55 @@ window.addEventListener('popstate', () => {
   $('optimizePromptBtn').setAttribute('aria-label', '优化提示词');
   $('optimizePromptBtn').title = '优化提示词';
 
-  $('imageInput').onchange = async () => {
-    await readImageFiles($('imageInput').files);
-    $('imageInput').value = '';
+  const imageInput = $('imageInput');
+  const openImagePicker = () => imageInput?.click();
+  $('uploadBox')?.addEventListener('click', openImagePicker);
+  $('uploadTriggerBtn')?.addEventListener('click', openImagePicker);
+  imageInput.onchange = async () => {
+    try {
+      await readImageFiles(imageInput.files);
+    } catch (error) {
+      setStatus(error.message || '图片读取失败，请重试。', true);
+    } finally {
+      imageInput.value = '';
+    }
+  };
+
+  const uploadDropTargets = [
+    $('create'),
+    $('uploadBox'),
+    $('uploadTriggerBtn')
+  ].filter(Boolean);
+  const setUploadDragging = (dragging) => {
+    $('create')?.classList.toggle('dragging-upload', dragging);
+    $('uploadBox')?.classList.toggle('dragging', dragging);
+    document.querySelector('.upload-trigger')?.classList.toggle('dragging', dragging);
   };
 
   ['dragenter', 'dragover'].forEach((eventName) => {
-    $('uploadBox').addEventListener(eventName, (event) => {
+    uploadDropTargets.forEach((target) => target.addEventListener(eventName, (event) => {
       event.preventDefault();
+      event.stopPropagation();
       state.dragDepth += eventName === 'dragenter' ? 1 : 0;
-      $('uploadBox').classList.add('dragging');
-    });
+      setUploadDragging(true);
+    }));
   });
 
   ['dragleave', 'drop'].forEach((eventName) => {
-    $('uploadBox').addEventListener(eventName, async (event) => {
+    uploadDropTargets.forEach((target) => target.addEventListener(eventName, async (event) => {
       event.preventDefault();
+      event.stopPropagation();
       state.dragDepth = Math.max(0, state.dragDepth - 1);
       if (eventName === 'drop') {
         state.dragDepth = 0;
-        await readImageFiles(event.dataTransfer?.files);
+        try {
+          await readImageFiles(event.dataTransfer?.files);
+        } catch (error) {
+          setStatus(error.message || '图片读取失败，请重试。', true);
+        }
       }
-      if (state.dragDepth === 0) $('uploadBox').classList.remove('dragging');
-    });
+      if (state.dragDepth === 0) setUploadDragging(false);
+    }));
   });
 
   $('generateBtn').onclick = async () => {
@@ -5535,63 +6164,57 @@ window.addEventListener('popstate', () => {
         method: 'POST',
         body: { userId: $('topupUser').value, amountSingularity: Number($('topupAmount').value || 0) }
       });
-      setStatus(`已给 ${data.user.username} 加余额。`);
+      setAdminStatus(`已给 ${data.user.username} 加余额。`);
       await renderAll();
     } catch (error) {
-      setStatus(error.message, true);
+      setAdminStatus(error.message, true);
     }
   };
   $('adminRefreshBtn').onclick = () => loadAdmin();
   $('adminConsoleNav').addEventListener('click', (event) => {
     const button = event.target.closest('[data-admin-tab]');
     if (!button) return;
-    state.adminActiveTab = button.dataset.adminTab || 'overview';
-    renderAdminConsole();
-    if (state.adminActiveTab === 'generationLogs') loadAdminGenerationLogs().catch((error) => setStatus(`生图日志读取失败：${error.message}`, true));
-    if (state.adminActiveTab === 'redeem') loadAdminRedeemCodes().catch((error) => setStatus(`卡密读取失败：${error.message}`, true));
+    setAdminActiveTab(button.dataset.adminTab || 'overview');
   });
   $('adminOverviewSection')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-admin-tab-jump]');
     if (!button) return;
-    state.adminActiveTab = button.dataset.adminTabJump || 'overview';
-    renderAdminConsole();
-    if (state.adminActiveTab === 'generationLogs') loadAdminGenerationLogs().catch((error) => setStatus(`生图日志读取失败：${error.message}`, true));
-    if (state.adminActiveTab === 'redeem') loadAdminRedeemCodes().catch((error) => setStatus(`卡密读取失败：${error.message}`, true));
+    setAdminActiveTab(button.dataset.adminTabJump || 'overview');
   });
   $('adminCreateRedeemBtn').onclick = createAdminRedeemCodeFromPanel;
   $('adminCopyRedeemBtn').onclick = copyAdminRedeemCodes;
   $('adminBatchRevokeRedeemBtn').onclick = batchRevokeAdminRedeemCodes;
   $('adminDownloadRedeemSelectedBtn')?.addEventListener('click', () => {
-    downloadAdminRedeemExport('selected').catch((error) => setStatus(error.message, true));
+    downloadAdminRedeemExport('selected').catch((error) => setAdminStatus(error.message, true));
   });
   $('adminDownloadRedeemFilteredBtn')?.addEventListener('click', () => {
-    downloadAdminRedeemExport('filtered').catch((error) => setStatus(error.message, true));
+    downloadAdminRedeemExport('filtered').catch((error) => setAdminStatus(error.message, true));
   });
   $('adminDownloadRedeemCreatedBtn')?.addEventListener('click', () => {
-    downloadAdminRedeemExport('created').catch((error) => setStatus(error.message, true));
+    downloadAdminRedeemExport('created').catch((error) => setAdminStatus(error.message, true));
   });
   $('adminRedeemPrevBtn')?.addEventListener('click', () => {
     if (state.adminRedeemPage <= 1) return;
     state.adminRedeemPage -= 1;
-    loadAdminRedeemCodes().catch((error) => setStatus(`卡密读取失败：${error.message}`, true));
+    loadAdminRedeemCodes().catch((error) => setAdminStatus(`卡密读取失败：${error.message}`, true));
   });
   $('adminRedeemNextBtn')?.addEventListener('click', () => {
     state.adminRedeemPage += 1;
-    loadAdminRedeemCodes().catch((error) => setStatus(`卡密读取失败：${error.message}`, true));
+    loadAdminRedeemCodes().catch((error) => setAdminStatus(`卡密读取失败：${error.message}`, true));
   });
   $('adminRedeemRefreshBtn')?.addEventListener('click', () => {
-    loadAdminRedeemCodes().catch((error) => setStatus(`卡密读取失败：${error.message}`, true));
+    loadAdminRedeemCodes().catch((error) => setAdminStatus(`卡密读取失败：${error.message}`, true));
   });
   $('adminRedeemStatusFilter').onchange = () => {
     state.adminRedeemStatusFilter = $('adminRedeemStatusFilter').value || 'all';
     state.adminRedeemPage = 1;
-    loadAdminRedeemCodes().catch((error) => setStatus(`卡密读取失败：${error.message}`, true));
+    loadAdminRedeemCodes().catch((error) => setAdminStatus(`卡密读取失败：${error.message}`, true));
   };
   $('adminRedeemSearch').oninput = () => {
     state.adminRedeemSearch = $('adminRedeemSearch').value || '';
     state.adminRedeemPage = 1;
     scheduleAdminRedeemSearch(() => {
-      loadAdminRedeemCodes().catch((error) => setStatus(`卡密读取失败：${error.message}`, true));
+      loadAdminRedeemCodes().catch((error) => setAdminStatus(`卡密读取失败：${error.message}`, true));
     });
   };
   $('adminCreateUserBtn').onclick = createAdminUser;
@@ -5602,7 +6225,7 @@ window.addEventListener('popstate', () => {
   $('adminGenerationLogSearch')?.addEventListener('input', () => {
     state.adminGenerationLogSearch = $('adminGenerationLogSearch').value || '';
     state.adminGenerationLogPage = 1;
-    scheduleAdminGenerationLogSearch(() => loadAdminGenerationLogs({ silent: true }).catch((error) => setStatus(`生图日志读取失败：${error.message}`, true)));
+    scheduleAdminGenerationLogSearch(() => loadAdminGenerationLogs({ silent: true }).catch((error) => setAdminStatus(`生图日志读取失败：${error.message}`, true)));
   });
   ['adminGenerationLogUserFilter', 'adminGenerationLogStatusFilter', 'adminGenerationLogModeFilter', 'adminGenerationLogSourceFilter'].forEach((id) => {
     $(id)?.addEventListener('change', () => {
@@ -5611,17 +6234,17 @@ window.addEventListener('popstate', () => {
       state.adminGenerationLogMode = $('adminGenerationLogModeFilter')?.value || 'all';
       state.adminGenerationLogSource = $('adminGenerationLogSourceFilter')?.value || 'all';
       state.adminGenerationLogPage = 1;
-      loadAdminGenerationLogs({ silent: true }).catch((error) => setStatus(`生图日志读取失败：${error.message}`, true));
+      loadAdminGenerationLogs({ silent: true }).catch((error) => setAdminStatus(`生图日志读取失败：${error.message}`, true));
     });
   });
-  $('adminGenerationLogRefreshBtn')?.addEventListener('click', () => loadAdminGenerationLogs().catch((error) => setStatus(`生图日志读取失败：${error.message}`, true)));
+  $('adminGenerationLogRefreshBtn')?.addEventListener('click', () => loadAdminGenerationLogs().catch((error) => setAdminStatus(`生图日志读取失败：${error.message}`, true)));
   $('adminGenerationLogPrevBtn')?.addEventListener('click', () => {
     state.adminGenerationLogPage = Math.max(1, Number(state.adminGenerationLogPage || 1) - 1);
-    loadAdminGenerationLogs().catch((error) => setStatus(`生图日志读取失败：${error.message}`, true));
+    loadAdminGenerationLogs().catch((error) => setAdminStatus(`生图日志读取失败：${error.message}`, true));
   });
   $('adminGenerationLogNextBtn')?.addEventListener('click', () => {
     state.adminGenerationLogPage = Number(state.adminGenerationLogPage || 1) + 1;
-    loadAdminGenerationLogs().catch((error) => setStatus(`生图日志读取失败：${error.message}`, true));
+    loadAdminGenerationLogs().catch((error) => setAdminStatus(`生图日志读取失败：${error.message}`, true));
   });
   $('adminConsolePanel')?.addEventListener('click', (event) => {
     const openButton = event.target.closest('[data-admin-community-open]');
@@ -5651,7 +6274,7 @@ window.addEventListener('popstate', () => {
     const statusButton = event.target.closest('[data-admin-user-status]');
     if (statusButton) {
       event.preventDefault();
-      updateAdminUserStatus(statusButton.dataset.adminUserStatus, statusButton.dataset.nextStatus);
+      updateAdminUserStatus(statusButton.dataset.adminUserStatus, statusButton.dataset.nextStatus, statusButton.dataset.userLabel || '');
       return;
     }
     const deleteButton = event.target.closest('[data-admin-delete-user]');
@@ -5734,6 +6357,7 @@ initGenerationSettingsController({
   setMode,
   setQuality,
   setSize,
+  setImageModel,
   setOutputFormat,
   setCount,
   setLayout,
@@ -5749,6 +6373,7 @@ initPreviewController({
   setStatus,
   setPreviewMeta,
   friendlyGenerateError,
+  yuan,
   applyGenerationSettings,
   openRechargeModal,
   addReferenceImage,
@@ -5771,6 +6396,7 @@ initHistoryPanel({
   reuse: reuseHistoryGeneration,
   resumePending: resumePendingGeneration,
   publish: publishHistoryGeneration,
+  loadMore: () => loadMoreHistory().catch((error) => setStatus(error.message, true)),
   communityDownload: downloadCommunityPost,
   shareCommunity: shareCommunityPost,
   viewCommunity: openCommunityDetail,
@@ -5779,8 +6405,10 @@ initHistoryPanel({
   addToCanvas: addHistoryGenerationToCanvas
 });
 initInfiniteCanvas({ onStatus: setStatus });
+document.body.classList.remove('theme-dark');
 bindEvents();
 const initialPanel = panelFromPath();
+if (initialPanel === 'admin') state.adminActiveTab = adminTabFromPath();
 if (initialPanel !== 'admin') {
   switchPanel(initialPanel, { updateUrl: false });
 }
@@ -5788,7 +6416,27 @@ await refreshHealth();
 if (panelFromPath() === 'prompts') await loadPromptLibrary();
 await loadStudioTemplates({ silent: true });
 await loadMe();
-switchPanel(panelFromPath(), { updateUrl: false });
+const postAuthPanel = panelFromPath();
+if (postAuthPanel === 'admin') {
+  state.adminActiveTab = adminTabFromPath();
+  if (!state.user) {
+    state.pendingAuthAction = {
+      type: 'admin',
+      path: window.location.pathname,
+      tab: state.adminActiveTab
+    };
+    switchPanel('settings', { updateUrl: false });
+    openAuthModal({ reason: 'admin' });
+    setStatus('请先登录管理员账号后继续。', true);
+  } else if (state.user.role !== 'admin') {
+    switchPanel('settings', { updateUrl: false });
+    setStatus('当前账号不是管理员，无法进入管理后台。', true);
+  } else {
+    switchPanel(postAuthPanel, { updateUrl: false });
+  }
+} else {
+  switchPanel(postAuthPanel, { updateUrl: false });
+}
 document.addEventListener('load', (event) => {
   const image = event.target;
   if (image instanceof HTMLImageElement && image.matches('img[data-result-image]')) {

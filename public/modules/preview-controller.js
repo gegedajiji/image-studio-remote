@@ -3,7 +3,7 @@ import { $, scrollIntoViewSafe } from './dom.js';
 import { copyText, escapeHtml } from './format.js';
 import { imageSources, itemImageSource, sourceToDataUrl } from './image-utils.js';
 import { addImageToCanvas, openInfiniteCanvas } from './infinite-canvas-entry.js';
-import { clearResultHtmlCache, renderGeneratedImagesHtml } from './result-view.js';
+import { clearResultHtmlCache, renderGeneratedImagesHtml, resultRenderKey } from './result-view.js';
 import { qualityLabel, resultMetaText, sizeLabelText, trimmedTitle } from './studio-format.js';
 import { scheduleResultLayoutSettle } from './workspace-ui.js';
 
@@ -25,6 +25,12 @@ let callbacks = {
   setPreferredStudioRoute: () => {}
 };
 let canvasOptions = {};
+
+function revealResultThread(thread) {
+  if (!thread) return;
+  if (document.body.classList.contains('studio-layout-v2') && window.innerWidth > 960) return;
+  scrollIntoViewSafe(thread, { behavior: 'smooth', block: 'start' });
+}
 
 export function initPreviewController(nextCallbacks = {}) {
   callbacks = { ...callbacks, ...nextCallbacks };
@@ -52,14 +58,14 @@ export function renderPreviewEmpty() {
   state.previewItem = null;
   clearResultHtmlCache();
   setStudioSessionActive(false);
-  document.querySelector('.result-thread')?.classList.remove('is-visible');
+  document.querySelector('.result-thread')?.classList.add('is-visible');
   preview.classList.remove('loading', 'has-result');
+  delete preview.dataset.resultRenderKey;
   syncPreviewStateClass();
   preview.innerHTML = `
     <div class="preview-empty">
-      <img src="/assets/showcase/hero-studio.svg" alt="生成预览占位" />
       <h3>等待生成</h3>
-      <p>结果会显示在这里，成功后可直接下载，也可以上传到交流区邀请点赞和评论。</p>
+      <p>生成结果会显示在这里。</p>
     </div>
   `;
   syncPreviewStateClass();
@@ -75,15 +81,23 @@ export function renderGeneratedImages(item) {
   }
   state.previewState = 'result';
   state.previewItem = item;
+  const renderKey = resultRenderKey(item);
+  const canReuseRenderedResult = preview.dataset.resultRenderKey === renderKey
+    && preview.classList.contains('has-result');
   setStudioSessionActive(true);
   document.querySelector('.result-thread')?.classList.add('is-visible');
   preview.classList.remove('loading');
   syncPreviewStateClass();
-  preview.innerHTML = renderGeneratedImagesHtml(item);
+  if (!canReuseRenderedResult) {
+    preview.innerHTML = renderGeneratedImagesHtml(item);
+    preview.dataset.resultRenderKey = renderKey;
+  }
   preview.classList.add('has-result');
   syncPreviewStateClass();
-  bindResultImageStates();
-  bindResultActions(item);
+  if (!canReuseRenderedResult) {
+    bindResultImageStates();
+    bindResultActions(item);
+  }
   scheduleResultLayoutSettle();
 }
 
@@ -97,15 +111,11 @@ export function setResultImageState(image, nextState) {
 
 function bindResultImageStates() {
   document.querySelectorAll('.result-image-frame img[data-result-image]').forEach((image) => {
-    const markLoaded = () => setResultImageState(image, 'loaded');
-    const markBroken = () => setResultImageState(image, 'broken');
     setResultImageState(image, 'loading');
     if (image.complete) {
-      if (image.naturalWidth > 0) markLoaded();
-      else markBroken();
+      if (image.naturalWidth > 0) setResultImageState(image, 'loaded');
+      else setResultImageState(image, 'broken');
     }
-    image.onload = markLoaded;
-    image.onerror = markBroken;
   });
 }
 
@@ -117,7 +127,15 @@ export function renderFailedGeneration(item, message) {
   clearResultHtmlCache();
   setStudioSessionActive(true);
   document.querySelector('.result-thread')?.classList.add('is-visible');
+  delete preview.dataset.resultRenderKey;
   const failedMessage = callbacks.friendlyGenerateError(message || item?.error || '生成失败');
+  const failureText = `${message || ''} ${item?.error || ''} ${failedMessage}`.toLowerCase();
+  const shouldOfferRecharge = /余额不足|额度不足|奇点不足|insufficient|balance|402/.test(failureText);
+  const refundText = item?.id
+    ? (Number(item.refundedAmountCents || 0) > 0
+      ? `失败记录已保存，已自动退回 ${callbacks.yuan ? callbacks.yuan(item.refundedAmountCents) : '余额'}。`
+      : '失败记录已保存，退款状态会在历史中同步。')
+    : '本次没有产生可保存的生成记录。';
   preview.classList.remove('loading');
   syncPreviewStateClass();
   preview.innerHTML = `
@@ -125,11 +143,11 @@ export function renderFailedGeneration(item, message) {
       <img src="/assets/showcase/cyber-city.svg" alt="生成失败" />
       <h3>生成失败</h3>
       <p>${escapeHtml(failedMessage)}</p>
-      <small>${item?.id ? '失败记录已保存，本次失败已自动退款。' : '本次没有产生可保存的生成记录。'}</small>
+      <small>${escapeHtml(refundText)}</small>
       <div class="result-actions">
         ${item?.id ? '<button type="button" data-failed-action="retry">重试同参数</button>' : ''}
         ${item?.prompt ? '<button type="button" data-failed-action="reuse">修改提示词</button>' : ''}
-        <button type="button" data-failed-action="recharge">去充值</button>
+        ${shouldOfferRecharge ? '<button type="button" data-failed-action="recharge">去充值</button>' : ''}
       </div>
     </div>
   `;
@@ -142,7 +160,7 @@ export function renderFailedGeneration(item, message) {
       const action = button.dataset.failedAction;
       if (action === 'retry') return callbacks.applyGenerationSettings(item, { submit: true, statusText: '正在按失败记录重试…' });
       if (action === 'reuse') return callbacks.applyGenerationSettings(item, { submit: false, statusText: '已回填失败任务参数，可修改后再生成。' });
-      if (action === 'recharge') return callbacks.openRechargeModal();
+      if (action === 'recharge') return callbacks.openRechargeModal({ reason: 'generate' });
     };
   });
 }
@@ -194,8 +212,13 @@ async function useResultAsReference(item, index, action) {
 function bindResultActions(item) {
   document.querySelectorAll('[data-result-action]').forEach((button) => {
     button.onclick = async (event) => {
-      const action = event.currentTarget.dataset.resultAction;
-      const index = Number(event.currentTarget.dataset.resultIndex || 0);
+      const actionButton = event.currentTarget;
+      if (actionButton.dataset.actionPending === '1') return;
+      actionButton.dataset.actionPending = '1';
+      actionButton.disabled = true;
+      actionButton.setAttribute('aria-busy', 'true');
+      const action = actionButton.dataset.resultAction;
+      const index = Number(actionButton.dataset.resultIndex || 0);
       const src = itemImageSource(item, index);
       try {
         if (action === 'retryImage') {
@@ -224,11 +247,11 @@ function bindResultActions(item) {
           return;
         }
         if (action === 'viewCommunity') {
-          await callbacks.openCommunityDetail(event.currentTarget.dataset.communityPostId, { updateUrl: true });
+          await callbacks.openCommunityDetail(actionButton.dataset.communityPostId, { updateUrl: true });
           return;
         }
         if (action === 'shareCommunity') {
-          await callbacks.shareCommunityPost(event.currentTarget.dataset.communityPostId);
+          await callbacks.shareCommunityPost(actionButton.dataset.communityPostId);
           return;
         }
         if (action === 'rerun') {
@@ -236,6 +259,10 @@ function bindResultActions(item) {
         }
       } catch (error) {
         callbacks.setStatus(error.message, true);
+      } finally {
+        delete actionButton.dataset.actionPending;
+        actionButton.removeAttribute('aria-busy');
+        if (actionButton.isConnected) actionButton.disabled = false;
       }
     };
   });
@@ -248,7 +275,6 @@ export function showGenerationInPreview(item) {
   }
   setStudioSessionActive(true);
   document.querySelector('.result-thread')?.classList.add('is-visible');
-  scheduleResultLayoutSettle();
   if (item.status === 'pending') {
     renderGeneratingPreview(item);
   } else if (item.status === 'failed') {
@@ -257,8 +283,7 @@ export function showGenerationInPreview(item) {
     renderGeneratedImages(item);
     callbacks.setPreviewMeta(`${qualityLabel(item.quality)} · ${sizeLabelText(item.size)} · ${item.count || imageSources(item).length || 1} 张`);
   }
-  scrollIntoViewSafe(document.querySelector('.result-thread'), { behavior: 'smooth', block: 'start' });
-  scheduleResultLayoutSettle();
+  revealResultThread(document.querySelector('.result-thread'));
 }
 
 export function pendingGenerationMeta(item) {
@@ -277,6 +302,7 @@ export function renderGeneratingPreview(item = null) {
   thread?.classList.add('is-visible');
   preview.classList.remove('has-result');
   preview.classList.add('loading');
+  delete preview.dataset.resultRenderKey;
   syncPreviewStateClass();
   preview.innerHTML = `
     <div class="generating-stage">
@@ -292,6 +318,6 @@ export function renderGeneratingPreview(item = null) {
       </div>
     </div>
   `;
-  scrollIntoViewSafe(thread, { behavior: 'smooth', block: 'start' });
+  revealResultThread(thread);
   scheduleResultLayoutSettle();
 }

@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import dns from 'node:dns/promises';
-import net from 'node:net';
 import tls from 'node:tls';
 import { DatabaseSync } from 'node:sqlite';
 import express from 'express';
@@ -16,9 +15,11 @@ import { Agent, request } from 'undici';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { config, supportedQualities, supportedSizes } from './config.js';
-import { chatText, editImage, editStoryboardImages, generateImage, generateStoryboardImages, normalizeCount, normalizeOutputFormatForSize, normalizeQuality, normalizeSize, optimizePrompt } from './imageClient.js';
+import { availableImageModels, chatText, editImage, editStoryboardImages, generateImage, generateStoryboardImages, normalizeCount, normalizeOutputFormatForSize, normalizeQuality, normalizeSize, optimizePrompt, refreshAvailableImageModels } from './imageClient.js';
+import { isPrivateProxyIp } from './imageProxySafety.js';
+import { validateImageBuffer } from './imageValidation.js';
 import { apiKeyMiddleware, authMiddleware, loginUser, logout, registerUser, requireAdmin, requireApiUser, requireUser, sanitizeUser, setSessionCookie } from './auth.js';
-import { addBalance, adminCreateUser, adminDeleteUser, adminResetUserPassword, adminUpdateUserStatus, aiSettings, billingPrices, billingSettings, createApiKey, createChargedGeneration, createCommunityComment, createCommunityPost, createRedeemCode, createRedeemCodesBatch, deleteCommunityComment, deleteCommunityPost, deleteGenerationByUser, deleteGenerationsByUser, expireStalePendingGenerations, findGenerationById, findUserById, generationBillingSummary, generationPendingStats, initStore, listApiKeysByUser, pinCommunityComment, recordCommunityDownload, recordCommunityReuse, recoverRestartPendingGenerations, redeemCode, refreshGenerationFromDurableStore, refundBalance, reportCommunityComment, resolveCommunityCommentReports, revokeApiKeyByUser, revokeRedeemCode, revokeRedeemCodesBatch, setCommunityFeedbackHandled, snapshot, storeStats, tipCommunityPost, toggleCommunityLike, unpinCommunityComment, updateAiSettings, updateBillingPrices, updateCommunityPost, updateGeneration } from './store.js';
+import { addBalance, adminCreateUser, adminDeleteUser, adminResetUserPassword, adminUpdateUserStatus, aiSettings, billingPrices, billingSettings, createApiKey, createChargedGeneration, createCommunityComment, createCommunityPost, createRedeemCode, createRedeemCodesBatch, deleteCommunityComment, deleteCommunityPost, deleteGenerationByUser, deleteGenerationsByUser, expireStalePendingGenerations, failPendingGenerationsForUser, findGenerationById, findUserById, finishGenerationIfPending, generationBillingSummary, generationPendingStats, initStore, listApiKeysByUser, pinCommunityComment, recordCommunityDownload, recordCommunityReuse, recoverRestartPendingGenerations, redeemCode, refreshGenerationFromDurableStore, reportCommunityComment, resolveCommunityCommentReports, retryPendingGenerationRefunds, revokeApiKeyByUser, revokeRedeemCode, revokeRedeemCodesBatch, setCommunityFeedbackHandled, snapshot, storeStats, tipCommunityPost, toggleCommunityLike, unpinCommunityComment, updateAiSettings, updateBillingPrices, updateCommunityPost, updateGeneration, updateGenerationIfPending } from './store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, '..', 'public');
@@ -119,17 +120,23 @@ let generationJobsFailed = 0;
 let persistedGenerationJobCount = 0;
 let generationJobDb = null;
 let generationJobStatements = null;
+let generationAdmissionLock = Promise.resolve();
 const generationWorkerId = `${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
 const maxGenerationWorkers = Math.max(1, Math.min(4, Math.trunc(Number(process.env.IMAGE_WORKER_CONCURRENCY || 2))));
 const generationWorkersDisabled = process.env.IMAGE_WORKER_DISABLED === '1';
 const generationJobLeaseMs = Math.max(30_000, Math.trunc(Number(process.env.IMAGE_JOB_LEASE_MS || 120_000)));
 const generationJobHeartbeatMs = Math.max(5_000, Math.min(30_000, Math.trunc(Number(process.env.IMAGE_JOB_HEARTBEAT_MS || Math.floor(generationJobLeaseMs / 3)))));
 const generationJobLeaseRetryMs = Math.max(1_000, Math.min(generationJobLeaseMs, Math.trunc(Number(process.env.IMAGE_JOB_LEASE_RETRY_MS || 5_000))));
+const generationJobTimeoutMs = Math.max(60_000, Math.trunc(Number(process.env.IMAGE_JOB_TIMEOUT_MS || 12 * 60_000)));
+const generationJobQueuedTimeoutMs = Math.max(generationJobTimeoutMs, Math.trunc(Number(process.env.IMAGE_JOB_QUEUED_TIMEOUT_MS || 20 * 60_000)));
 const maxPersistedGenerationJobs = Math.max(1, Math.trunc(Number(process.env.IMAGE_MAX_PERSISTED_JOBS || 100)));
 const maxPendingGenerations = Math.max(maxPersistedGenerationJobs, Math.trunc(Number(process.env.IMAGE_MAX_PENDING_GENERATIONS || maxPersistedGenerationJobs)));
 const maxPendingGenerationsPerUser = Math.max(1, Math.trunc(Number(process.env.IMAGE_MAX_PENDING_PER_USER || 3)));
 const maxProxyImageBytes = 24 * 1024 * 1024;
+const maxProxyImageRedirects = 3;
 const proxyImageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const allowLocalProxyImageUrls = process.env.NODE_ENV !== 'production' && process.env.IMAGE_PROXY_ALLOW_LOCAL === '1';
+const proxyImageRedirectStatusCodes = new Set([301, 302, 303, 307, 308]);
 const communityReuseCookieName = 'community_reuse_id';
 const communityReuseCookieMaxAge = 180 * 24 * 60 * 60 * 1000;
 const communityReuseIntentMaxAge = 30 * 60 * 1000;
@@ -331,18 +338,45 @@ const formatByMime = {
   'image/png': 'png',
   'image/webp': 'webp'
 };
+const maxSourceImageBytes = 12 * 1024 * 1024;
 
-function dataUrlImageSource(dataUrl, index = 0) {
-  const match = String(dataUrl || '').match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
-  if (!match) return null;
+function parseImageDataUrl(dataUrl, index = 0, label = '源图') {
+  const match = String(dataUrl || '').trim().match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) throw new Error(`请上传有效${label}`);
   const [, mimeType, imageBase64] = match;
-  if (!imageBase64 || imageBase64.length > 24 * 1024 * 1024) return null;
+  const buffer = Buffer.from(imageBase64 || '', 'base64');
+  if (!buffer.length) throw new Error(`${label}内容为空`);
+  if (buffer.length > maxSourceImageBytes) throw new Error(`${label}不能超过 12 兆`);
+  validateImageBuffer(buffer, { mimeType, label });
   return {
     imageBase64,
     mimeType,
     outputFormat: formatByMime[mimeType] || 'jpeg',
     sourceIndex: index
   };
+}
+
+function dataUrlImageSource(dataUrl, index = 0) {
+  try {
+    return parseImageDataUrl(dataUrl, index);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGenerationImageDataUrls(dataUrls = []) {
+  return (Array.isArray(dataUrls) ? dataUrls : [])
+    .slice(0, 4)
+    .map((dataUrl, index) => {
+      const parsed = parseImageDataUrl(dataUrl, index, `源图 ${index + 1}`);
+      return `data:${parsed.mimeType};base64,${parsed.imageBase64}`;
+    });
+}
+
+function normalizeMaskDataUrl(dataUrl = '') {
+  if (!dataUrl) return '';
+  const parsed = parseImageDataUrl(dataUrl, 0, '蒙版');
+  return `data:${parsed.mimeType};base64,${parsed.imageBase64}`;
 }
 
 function generationSourceImagesFromDataUrls(dataUrls = []) {
@@ -358,6 +392,8 @@ function uploadedFileToDataUrl(file) {
   if (!proxyImageMimeTypes.has(mimeType)) {
     throw new Error('只支持 JPG、PNG、WEBP 源图');
   }
+  if (file.buffer.length > maxSourceImageBytes) throw new Error('源图不能超过 12 兆');
+  validateImageBuffer(file.buffer, { mimeType, label: '源图' });
   return `data:${mimeType};base64,${file.buffer.toString('base64')}`;
 }
 
@@ -370,6 +406,7 @@ function uploadedFilesToDataUrls(files = []) {
 }
 
 const historyImageUrl = (item, index = 0) => `/api/history/${encodeURIComponent(item.id)}/image/${index}`;
+const historySourceImageUrl = (item, index = 0) => `/api/history/${encodeURIComponent(item.id)}/source/${index}`;
 
 const imageSummary = (item, image, index = 0) => ({
   imageUrl: (image.imageUrl || image.imageBase64) ? historyImageUrl(item, index) : null,
@@ -430,14 +467,15 @@ function publicSourceImageUrlForGeneration(generation, index = 0) {
   return `/api/community/generations/${encodeURIComponent(generation.id)}/source/${index}`;
 }
 
-function generationSourceImages(generation) {
+function generationSourceImages(generation, options = {}) {
   if (!generation || generation.mode !== 'edit' || !Array.isArray(generation.sourceImages)) return [];
+  const urlForSource = options.scope === 'community' ? publicSourceImageUrlForGeneration : historySourceImageUrl;
   return generation.sourceImages
     .map((image, index) => {
       const mimeType = image?.mimeType || mimeByFormat[image?.outputFormat] || 'image/png';
       if (!image || (!image.imageUrl && !image.imageBase64) || !proxyImageMimeTypes.has(mimeType)) return null;
       return {
-        imageUrl: publicSourceImageUrlForGeneration(generation, index),
+        imageUrl: urlForSource(generation, index),
         outputFormat: image.outputFormat || formatByMime[mimeType] || 'jpeg',
         mimeType,
         sourceIndex: Number.isInteger(image.sourceIndex) ? image.sourceIndex : index,
@@ -471,16 +509,32 @@ function resolveCommunityDownloadIndex(post, generation, requestedIndex) {
 
 function publicGenerationError(message) {
   const text = String(message || '');
-  const lowerText = text.toLowerCase();
+  const humanText = text.replace(/\s+/g, ' ').trim();
+  const compactText = text.replace(/\s+/g, '');
+  const lowerText = humanText.toLowerCase();
   if (text.includes('API key') || text.includes('IMAGE_UPSTREAM_API_KEY')) return '生成通道暂不可用，请联系管理员检查配置。';
-  if (text.includes('No available compatible accounts')) return '上游生图账号池暂无可用账号，本次未扣费，请管理员在后台切换可用上游或稍后重试。';
-  if (lowerText.includes('error code: 502') || text.includes('上游生图网关返回 502')) return '上游生图网关当前不可用，本次未扣费，请管理员在后台切换可用上游或稍后重试。';
-  if (text.includes('上游生图网关返回')) return '上游生图网关返回错误，本次未扣费，请管理员检查上游配置或稍后重试。';
-  if (text.includes('openai_error')) return '生成通道返回错误，本次未扣费，请稍后重试。';
-  if (text.includes('other side closed') || text.includes('UND_ERR_SOCKET') || text.includes('ECONNRESET')) return '生成通道连接中断，本次未扣费，请稍后重试。';
-  if (lowerText.includes('fetch failed') || lowerText.includes('timeout') || text.includes('headersTimeout')) return '生成通道响应超时，本次未扣费，请稍后重试。';
+  if (text.includes('No available compatible accounts')) return '上游生图账号池暂无可用账号，如已预扣会自动退回，请管理员在后台切换可用上游或稍后重试。';
+  if (lowerText.includes('error code: 502') || text.includes('上游生图网关返回 502')) return '上游生图网关当前不可用，如已预扣会自动退回，请管理员在后台切换可用上游或稍后重试。';
+  if (text.includes('上游生图网关返回')) return '上游生图网关返回错误，如已预扣会自动退回，请管理员检查上游配置或稍后重试。';
+  if (text.includes('openai_error')) return '生成通道返回错误，如已预扣会自动退回，请稍后重试。';
+  if (text.includes('other side closed') || text.includes('UND_ERR_SOCKET') || text.includes('ECONNRESET')) return '生成通道连接中断，如已预扣会自动退回，请稍后重试。';
+  if (lowerText.includes('fetch failed') || lowerText.includes('timeout') || text.includes('headersTimeout')) return '生成通道响应超时，如已预扣会自动退回，请稍后重试。';
+  if (
+    lowerText.includes('content policy')
+    || lowerText.includes('safety policy')
+    || lowerText.includes('policy violation')
+    || lowerText.includes('moderation')
+    || (
+      compactText.includes('抱歉')
+      && (compactText.includes('不能') || compactText.includes('无法') || compactText.includes('不可以'))
+      && (compactText.includes('生成') || compactText.includes('帮助') || compactText.includes('协助'))
+    )
+  ) {
+    return '提示词未通过上游内容策略，已自动退款。请调整为更安全、明确的创作描述后重试。';
+  }
   if (text.includes('size') || text.includes('4096') || text.includes('2048')) return '当前图片尺寸不被上游支持，请刷新后重试。';
-  return text || '生成失败，请稍后重试。';
+  if (!humanText) return '生成失败，请稍后重试。';
+  return humanText.length > 220 ? `${humanText.slice(0, 220)}…` : humanText;
 }
 
 function publicOptimizeError(message) {
@@ -496,21 +550,102 @@ function publicOptimizeError(message) {
   return text || '优化失败，请稍后重试。';
 }
 
-const generationSummary = (item, billing = null) => ({
-  ...item,
-  error: item.error ? publicGenerationError(item.error) : item.error,
-  imageUrl: (item.imageUrl || item.imageBase64) ? historyImageUrl(item, 0) : null,
-  imageBase64: null,
-  images: generationImages(item),
-  consumedAmountCents: Number(billing?.consumedAmountCents || 0),
-  refundedAmountCents: Number(billing?.refundedAmountCents || 0),
-  remainingAmountCents: Number(billing?.remainingAmountCents || 0),
-  billingState: billing?.refundedAmountCents
-    ? 'refunded'
-    : billing?.consumedAmountCents
-      ? 'charged'
-      : 'no_charge'
-});
+function publicGenerationMetadata(metadata = {}) {
+  const safe = {};
+  [
+    'requestedCount',
+    'returnedCount',
+    'failedCount',
+    'queuedAt',
+    'workerStartedAt',
+    'workerFinishedAt',
+    'workerFailedAt',
+    'timedOutAt',
+    'partialRefundCents',
+    'partialRefundRequestedCents',
+    'refundCents',
+    'refundError',
+    'partialRefundError',
+    'refundPending',
+    'refundRequestedCents',
+    'refundRetryCount',
+    'refundLastAttemptAt',
+    'refundClearedAt',
+    'refundRecoveredAt',
+    'refundRecoveredCents',
+    'errorCode',
+    'errorStatusCode'
+  ].forEach((key) => {
+    if (metadata[key] !== undefined && metadata[key] !== null) safe[key] = metadata[key];
+  });
+  if (Array.isArray(metadata.batchFailures)) {
+    safe.batchFailures = metadata.batchFailures.slice(0, 4).map((item) => ({
+      code: item?.code || null,
+      message: publicGenerationError(item?.message || item?.error || ''),
+      statusCode: item?.statusCode || null,
+      imageIndex: Number.isInteger(item?.imageIndex) ? item.imageIndex : null
+    }));
+  }
+  return safe;
+}
+
+function publicGenerationBase(item = {}) {
+  return {
+    id: item.id || null,
+    userId: item.userId || null,
+    username: item.username || null,
+    status: item.status || null,
+    createdAt: item.createdAt || null,
+    updatedAt: item.updatedAt || null,
+    startedAt: item.startedAt || null,
+    finishedAt: item.finishedAt || null,
+    durationMs: Number(item.durationMs || 0) || null,
+    mode: item.mode || null,
+    source: item.source || null,
+    prompt: item.prompt || '',
+    quality: item.quality || null,
+    size: item.size || null,
+    outputFormat: item.outputFormat || null,
+    count: Number(item.count || 0) || null,
+    layout: item.layout || null,
+    storyboardPrompts: Array.isArray(item.storyboardPrompts) ? item.storyboardPrompts.slice(0, 4) : null,
+    priceCents: Number(item.priceCents || 0) || 0,
+    model: item.model || null,
+    communityPostId: item.communityPostId || null,
+    communityPost: item.communityPost || null,
+    reuseSourcePostId: item.reuseSourcePostId || null,
+    deletedFromHistoryAt: item.deletedFromHistoryAt || null
+  };
+}
+
+const generationSummary = (item, billing = null) => {
+  const consumedAmountCents = Number(billing?.consumedAmountCents || 0);
+  const refundedAmountCents = Number(billing?.refundedAmountCents || 0);
+  const remainingAmountCents = Number(billing?.remainingAmountCents || 0);
+  return {
+    ...publicGenerationBase(item || {}),
+    error: item?.error ? publicGenerationError(item.error) : item?.error,
+    imageUrl: (item?.imageUrl || item?.imageBase64) ? historyImageUrl(item, 0) : null,
+    imageBase64: null,
+    images: generationImages(item),
+    sourceImages: generationSourceImages(item),
+    metadata: publicGenerationMetadata(item?.metadata || {}),
+    consumedAmountCents,
+    refundedAmountCents,
+    remainingAmountCents,
+    billingState: refundedAmountCents
+      ? (remainingAmountCents > 0 ? 'partial_refunded' : 'refunded')
+      : consumedAmountCents
+        ? 'charged'
+        : 'no_charge'
+  };
+};
+
+const generationSummaryWithBilling = (item, userId = null) => {
+  if (!item) return null;
+  const billing = item.id ? generationBillingSummary(item.id, userId || item.userId) : null;
+  return generationSummary(item, billing);
+};
 
 function adminTransactionSummary(tx) {
   const reason = String(tx.reason || '').replace(/兑换码\s+[A-Z0-9-]{6,32}/g, '兑换码 ****');
@@ -712,6 +847,18 @@ function adminCommunityPostSummary(post) {
   };
 }
 
+function cleanCommunityDisplayText(value) {
+  const placeholderPrefixes = ['我想把它用于：', '希望大家帮我看：', '最想听哪一处建议：'];
+  return String(value || '')
+    .replace(/\s*清晰度要求[:：][^\n\r。；;]*/gi, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !placeholderPrefixes.some((prefix) => line === prefix))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function attachPublishedPost(generation, db, req) {
   const billing = generationBillingSummary(generation.id, generation.userId);
   const summary = generationSummary(generation, billing);
@@ -825,6 +972,10 @@ function canViewPostFeedbackCounts(post, req) {
   return Boolean(req.user?.id && (req.user.role === 'admin' || req.user.id === post.userId));
 }
 
+function canViewCommunitySourceImages(post, req) {
+  return Boolean(post?.showSourceImages || canViewPostFeedbackCounts(post, req));
+}
+
 function pendingFeedbackCountsForPost(post, db) {
   const reportsByCommentId = new Map();
   db.communityCommentReports
@@ -903,27 +1054,6 @@ function communityPostMatchesDiscovery(summary, discovery) {
   return true;
 }
 
-function isPrivateProxyIp(address) {
-  if (!address) return true;
-  if (net.isIPv6(address)) {
-    const normalized = address.toLowerCase();
-    return normalized === '::1'
-      || normalized === '::'
-      || normalized.startsWith('fc')
-      || normalized.startsWith('fd')
-      || normalized.startsWith('fe80:');
-  }
-  if (!net.isIPv4(address)) return true;
-  const parts = address.split('.').map(Number);
-  return parts[0] === 0
-    || parts[0] === 10
-    || parts[0] === 127
-    || (parts[0] === 169 && parts[1] === 254)
-    || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
-    || (parts[0] === 192 && parts[1] === 168)
-    || (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127);
-}
-
 async function validateProxyImageUrl(imageUrl) {
   let parsed;
   try {
@@ -931,55 +1061,129 @@ async function validateProxyImageUrl(imageUrl) {
   } catch {
     throw new Error('invalid_image_url');
   }
-  if (parsed.protocol !== 'https:') throw new Error('invalid_image_url');
+  if (!allowLocalProxyImageUrls && parsed.protocol !== 'https:') throw new Error('invalid_image_url');
+  if (allowLocalProxyImageUrls && !['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid_image_url');
   const addresses = await dns.lookup(parsed.hostname, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some((entry) => isPrivateProxyIp(entry.address))) {
+  if (!addresses.length) {
     throw new Error('invalid_image_url');
   }
-  return { href: parsed.href, hostname: parsed.hostname, address: addresses[0].address };
+  if (!allowLocalProxyImageUrls && addresses.some((entry) => isPrivateProxyIp(entry.address))) {
+    throw new Error('invalid_image_url');
+  }
+  return { href: parsed.href, protocol: parsed.protocol, hostname: parsed.hostname, address: addresses[0].address };
 }
 
-function proxyImageDispatcher({ hostname, address }) {
+function proxyImageDispatcher({ protocol, hostname, address }) {
+  if (allowLocalProxyImageUrls && protocol === 'http:') return undefined;
   return new Agent({
     connect(connectOptions, callback) {
+      let settled = false;
       const socket = tls.connect({
         ...connectOptions,
         host: address,
+        port: connectOptions.port || 443,
         servername: hostname
       });
-      callback(null, socket);
+      const cleanup = () => {
+        socket.off('secureConnect', onSecureConnect);
+        socket.off('error', onError);
+        socket.off('timeout', onTimeout);
+      };
+      const done = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (!error) socket.setTimeout(0);
+        callback(error, error ? null : socket);
+      };
+      const onSecureConnect = () => done(null);
+      const onError = (error) => done(error);
+      const onTimeout = () => {
+        socket.destroy(new Error('connect_timeout'));
+      };
+      socket.once('secureConnect', onSecureConnect);
+      socket.once('error', onError);
+      socket.once('timeout', onTimeout);
+      socket.setTimeout(connectOptions.timeout || 20_000);
     }
   });
+}
+
+async function closeProxyImageDispatcher(dispatcher) {
+  if (!dispatcher?.close) return;
+  try {
+    await dispatcher.close();
+  } catch {
+    // Best-effort cleanup; the caller should preserve the original fetch error.
+  }
+}
+
+function destroyProxyImageBody(body) {
+  body?.on?.('error', () => {});
+  body?.destroy?.();
+}
+
+async function requestProxyImage(imageUrl) {
+  let nextImageUrl = imageUrl;
+  for (let redirectCount = 0; redirectCount <= maxProxyImageRedirects; redirectCount += 1) {
+    const safeImage = await validateProxyImageUrl(nextImageUrl);
+    const dispatcher = proxyImageDispatcher(safeImage);
+    let upstream;
+    try {
+      upstream = await request(safeImage.href, {
+        method: 'GET',
+        maxRedirections: 0,
+        bodyTimeout: 1000 * 60,
+        headersTimeout: 1000 * 20,
+        dispatcher
+      });
+    } catch (error) {
+      await closeProxyImageDispatcher(dispatcher);
+      throw error;
+    }
+
+    if (!proxyImageRedirectStatusCodes.has(upstream.statusCode)) {
+      return { upstream, dispatcher };
+    }
+
+    destroyProxyImageBody(upstream.body);
+    await closeProxyImageDispatcher(dispatcher);
+    if (redirectCount >= maxProxyImageRedirects) throw new Error('image_fetch_failed');
+    const redirectLocation = Array.isArray(upstream.headers.location)
+      ? upstream.headers.location[0]
+      : upstream.headers.location;
+    if (!redirectLocation) throw new Error('image_fetch_failed');
+    try {
+      nextImageUrl = new URL(String(redirectLocation), safeImage.href).href;
+    } catch {
+      throw new Error('invalid_image_url');
+    }
+  }
+  throw new Error('image_fetch_failed');
 }
 
 async function proxyImageUrl(res, imageUrl, { fallbackType = 'image/jpeg', cacheControl = 'public, max-age=3600', missingMessage = '图片不存在', readErrorMessage = '图片读取失败', onSuccess = null } = {}) {
   let transferred = 0;
   let dispatcher = null;
   try {
-    const safeImage = await validateProxyImageUrl(imageUrl);
-    dispatcher = proxyImageDispatcher(safeImage);
-    const upstream = await request(safeImage.href, {
-      method: 'GET',
-      maxRedirections: 0,
-      bodyTimeout: 1000 * 60,
-      headersTimeout: 1000 * 20,
-      dispatcher
-    });
+    const proxyRequest = await requestProxyImage(imageUrl);
+    const upstream = proxyRequest.upstream;
+    dispatcher = proxyRequest.dispatcher;
     if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
       return res.status(502).json({ success: false, message: readErrorMessage });
     }
     if (upstream.headers['content-length'] === '0') {
-      upstream.body.destroy?.();
+      destroyProxyImageBody(upstream.body);
       return res.status(404).json({ success: false, message: missingMessage });
     }
     const contentLength = Number(upstream.headers['content-length'] || 0);
     if (contentLength > maxProxyImageBytes) {
-      upstream.body.destroy?.();
+      destroyProxyImageBody(upstream.body);
       return res.status(413).json({ success: false, message: '图片文件过大' });
     }
     const contentType = String(upstream.headers['content-type'] || fallbackType).split(';')[0].trim().toLowerCase();
     if (!proxyImageMimeTypes.has(contentType)) {
-      upstream.body.destroy?.();
+      destroyProxyImageBody(upstream.body);
       return res.status(502).json({ success: false, message: readErrorMessage });
     }
     const limitedBody = Readable.from(upstream.body);
@@ -1001,7 +1205,7 @@ async function proxyImageUrl(res, imageUrl, { fallbackType = 'image/jpeg', cache
     const message = error.message === 'image_too_large' ? '图片文件过大' : (transferred === 0 ? missingMessage : readErrorMessage);
     res.status(error.message === 'image_too_large' ? 413 : 502).json({ success: false, message });
   } finally {
-    dispatcher?.close?.().catch?.(() => {});
+    await closeProxyImageDispatcher(dispatcher);
   }
 }
 
@@ -1009,15 +1213,9 @@ async function fetchProxyImageData(imageUrl, { fallbackType = 'image/jpeg' } = {
   let transferred = 0;
   let dispatcher = null;
   try {
-    const safeImage = await validateProxyImageUrl(imageUrl);
-    dispatcher = proxyImageDispatcher(safeImage);
-    const upstream = await request(safeImage.href, {
-      method: 'GET',
-      maxRedirections: 0,
-      bodyTimeout: 1000 * 60,
-      headersTimeout: 1000 * 20,
-      dispatcher
-    });
+    const proxyRequest = await requestProxyImage(imageUrl);
+    const upstream = proxyRequest.upstream;
+    dispatcher = proxyRequest.dispatcher;
     if (upstream.statusCode < 200 || upstream.statusCode >= 300) throw new Error('image_fetch_failed');
     if (upstream.headers['content-length'] === '0') throw new Error('image_empty');
     const contentLength = Number(upstream.headers['content-length'] || 0);
@@ -1032,19 +1230,25 @@ async function fetchProxyImageData(imageUrl, { fallbackType = 'image/jpeg' } = {
     }
     const buffer = Buffer.concat(chunks);
     if (!buffer.length) throw new Error('image_empty');
+    const detectedMimeType = validateImageBuffer(buffer, { mimeType: contentType, label: '图片', allowMimeMismatch: true });
+    const normalizedContentType = proxyImageMimeTypes.has(detectedMimeType) ? detectedMimeType : contentType;
     return {
       imageBase64: buffer.toString('base64'),
-      mimeType: contentType,
-      outputFormat: formatByMime[contentType] || formatByMime[fallbackType] || 'jpeg'
+      mimeType: normalizedContentType,
+      outputFormat: formatByMime[normalizedContentType] || formatByMime[fallbackType] || 'jpeg'
     };
   } finally {
-    dispatcher?.close?.().catch?.(() => {});
+    await closeProxyImageDispatcher(dispatcher);
   }
 }
 
 async function persistRemoteImages(result, outputFormat) {
   const images = Array.isArray(result?.images) ? result.images : [];
-  const hydrateImage = async (image) => {
+  const rawImages = images.length
+    ? images
+    : (result?.imageUrl || result?.imageBase64 ? [result] : []);
+  const persistenceFailures = [];
+  const hydrateImage = async (image, index) => {
     if (!image || image.imageBase64 || !image.imageUrl) return image;
     try {
       const persisted = await fetchProxyImageData(image.imageUrl, {
@@ -1058,16 +1262,38 @@ async function persistRemoteImages(result, outputFormat) {
       };
     } catch (error) {
       logger.warn({ err: error, imageUrl: image.imageUrl }, 'image persistence failed');
-      return image;
+      persistenceFailures.push({
+        index,
+        code: 'IMAGE_PERSIST_FAILED',
+        message: '图片保存失败'
+      });
+      return null;
     }
   };
-  const nextImages = images.length ? await Promise.all(images.map(hydrateImage)) : [];
+  const hydratedImages = rawImages.length ? await Promise.all(rawImages.map(hydrateImage)) : [];
+  const nextImages = hydratedImages.filter((image) => image && (image.imageBase64 || image.imageUrl));
+  const hasFallbackImage = Boolean(result?.imageBase64 || (!rawImages.length && result?.imageUrl));
+  if (rawImages.length && !nextImages.length && !hasFallbackImage && persistenceFailures.length) {
+    const persistError = new Error('图片保存失败，已自动退款，请重新生成');
+    persistError.code = 'IMAGE_PERSIST_FAILED';
+    persistError.batchFailures = [
+      ...(Array.isArray(result?.batchFailures) ? result.batchFailures : []),
+      ...persistenceFailures
+    ];
+    persistError.upstreamAttempts = Array.isArray(result?.upstreamAttempts) ? result.upstreamAttempts : [];
+    throw persistError;
+  }
   const firstImage = nextImages[0] || result || {};
+  const mergedBatchFailures = [
+    ...(Array.isArray(result?.batchFailures) ? result.batchFailures : []),
+    ...persistenceFailures
+  ];
   return {
     ...result,
     imageBase64: result?.imageBase64 || firstImage.imageBase64 || null,
     imageUrl: result?.imageUrl || firstImage.imageUrl || null,
-    images: nextImages.length ? nextImages : result?.images
+    images: nextImages.length ? nextImages : result?.images,
+    ...(mergedBatchFailures.length ? { batchFailures: mergedBatchFailures } : {})
   };
 }
 
@@ -1101,7 +1327,7 @@ function communityPostSummary(post, req, { db = snapshot(), includeComments = fa
   const canViewFullPrompt = includePrompt || canViewPostFeedbackCounts(post, req);
   const canViewReports = canViewPostFeedbackCounts(post, req);
   const canViewInternalRefs = canViewPostFeedbackCounts(post, req);
-  const canViewSupportStats = canViewPostFeedbackCounts(post, req);
+  const canViewSupportStats = includeSupport || canViewPostFeedbackCounts(post, req);
   const isOwnPost = Boolean(req.user?.id && post.userId === req.user.id);
   const publishedComments = includeComments
     ? db.communityComments
@@ -1150,7 +1376,8 @@ function communityPostSummary(post, req, { db = snapshot(), includeComments = fa
   const liked = Boolean(viewerId && db.communityLikes.some((like) => like.postId === post.id && like.userId === viewerId));
   const hasTipped = Boolean(viewerId && hasTippedPost(db, post.id, viewerId));
   const images = communityPostImages(post, generation);
-  const sourceImages = generationSourceImages(generation);
+  const sourceImages = generationSourceImages(generation, { scope: 'community' });
+  const canViewSourceImages = canViewCommunitySourceImages(post, req);
   const sameStyleVersions = includeComments
     ? db.communityPosts
       .filter((item) => item.status === 'published' && item.sourcePostId === post.id && item.id !== post.id)
@@ -1166,8 +1393,8 @@ function communityPostSummary(post, req, { db = snapshot(), includeComments = fa
   const summary = {
     id: post.id,
     username: post.username,
-    title: post.title,
-    description: post.description,
+    title: cleanCommunityDisplayText(post.title) || post.title,
+    description: cleanCommunityDisplayText(post.description),
     tags: post.tags || [],
     mode: generation?.mode || 'generate',
     quality: generation?.quality || null,
@@ -1182,7 +1409,8 @@ function communityPostSummary(post, req, { db = snapshot(), includeComments = fa
     commentCount,
     imageUrl: images[0]?.imageUrl ? absoluteUrl(req, images[0].imageUrl) : null,
     images: images.map((image) => communityPostImageSummary(req, image)),
-    sourceImages: sourceImages.map((image) => communityPostImageSummary(req, image)),
+    sourceImages: canViewSourceImages ? sourceImages.map((image) => communityPostImageSummary(req, image)) : [],
+    showSourceImages: Boolean(post.showSourceImages),
     canDownload: true,
     canReuse: Boolean(String(post.prompt || '').trim()),
     sourcePostId: post.sourcePostId || null,
@@ -1227,7 +1455,7 @@ function studioTemplatePrompt(post, template) {
   if (prompt) return prompt;
   const tags = Array.isArray(post?.tags) && post.tags.length ? `，关键词：${post.tags.slice(0, 4).join('、')}` : '';
   const mode = post?.mode === 'edit' ? '图生图风格延展' : '文生图创作';
-  return `${post?.title || template.title}，${post?.description || mode}${tags}，参考交流区对应类型作品的构图、质感和色彩，高清细节，无文字，无水印`;
+  return `${post?.title || template.title}，${cleanCommunityDisplayText(post?.description) || mode}${tags}，参考交流区对应类型作品的构图、质感和色彩，高清细节，无文字，无水印`;
 }
 
 function studioTemplateSearchText(post, generation) {
@@ -1271,9 +1499,9 @@ function communityPostTemplateSummary(post, req, { db, template }) {
     label: template.label,
     source: 'community',
     postId: summary.id,
-    title: summary.title || template.title,
-    description: summary.description || template.description,
-    prompt: studioTemplatePrompt(summary, template),
+    title: template.title,
+    description: template.description,
+    prompt: template.prompt,
     imageUrl: summary.imageUrl,
     hotScore: summary.hotScore || 0,
     likeCount: summary.likeCount || 0,
@@ -1445,6 +1673,15 @@ function apiError(res, status, message, type = 'invalid_request_error') {
   return res.status(status).json({ error: { message, type } });
 }
 
+function apiUploadError(res, error) {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') return apiError(res, 413, '单张源图不能超过 12MB。');
+    if (error.code === 'LIMIT_FILE_COUNT') return apiError(res, 413, '源图最多上传 4 张。');
+    return apiError(res, 400, `上传失败：${error.message}`);
+  }
+  return apiError(res, 400, error?.message || '上传失败');
+}
+
 function generationErrorStatus(message, fallback = 502) {
   const text = String(message || '');
   if (text.includes('余额不足')) return 402;
@@ -1453,8 +1690,15 @@ function generationErrorStatus(message, fallback = 502) {
     || text.includes('提示词最多')
     || text.includes('请先上传源图')
     || text.includes('请上传有效图片')
+    || text.includes('请上传有效源图')
+    || text.includes('请上传有效蒙版')
     || text.includes('只支持常见图片格式')
     || text.includes('图片不能超过')
+    || text.includes('源图内容为空')
+    || text.includes('源图不能超过')
+    || text.includes('蒙版内容为空')
+    || text.includes('蒙版不能超过')
+    || text.includes('格式与文件内容不一致')
   ) return 400;
   return fallback;
 }
@@ -1464,6 +1708,8 @@ function fileToDataUrl(file) {
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.mimetype)) {
     throw new Error('只支持常见图片格式');
   }
+  if (file.buffer.length > maxSourceImageBytes) throw new Error('图片不能超过 12 兆');
+  validateImageBuffer(file.buffer, { mimeType: file.mimetype, label: '图片' });
   return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 }
 
@@ -1482,12 +1728,25 @@ function parseStoryboardPrompts(input) {
     .slice(0, 4);
 }
 
+function normalizeRequestedImageModel(model) {
+  const requested = String(model || '').trim();
+  if (requested && (requested.length > 120 || !/^[a-zA-Z0-9._:/@-]+$/.test(requested))) {
+    throw new Error('模型名称格式不正确');
+  }
+  const models = availableImageModels();
+  if (requested) {
+    if (!models.includes(requested)) throw new Error('所选模型暂无可用通道');
+    return requested;
+  }
+  return '';
+}
+
 function normalizeGenerationRequest({ user, body, source = 'web', imageDataUrls = [], maskDataUrl = '' }) {
   const prompt = String(body.prompt || '').trim();
-  const mode = body.mode === 'edit' ? 'edit' : (imageDataUrls.length ? 'edit' : 'generate');
   const quality = normalizeApiQuality(body.quality);
   const size = normalizeSize(body.size);
   const outputFormat = normalizeOutputFormatForSize(body.outputFormat || body.output_format || body.response_format, size);
+  const imageModel = normalizeRequestedImageModel(body.model || body.imageModel);
   let count = normalizeCount(body.count || body.n);
   const layout = body.layout === 'storyboard' ? 'storyboard' : 'single';
   const storyboardPrompts = layout === 'storyboard' ? parseStoryboardPrompts(body.storyboardPrompts || body.storyboardText || '') : [];
@@ -1498,8 +1757,10 @@ function normalizeGenerationRequest({ user, body, source = 'web', imageDataUrls 
   const payloadImageDataUrls = Array.isArray(body.imageDataUrls)
     ? body.imageDataUrls.map((item) => String(item || '')).filter(Boolean).slice(0, 4)
     : (fallbackImageDataUrl ? [fallbackImageDataUrl] : []);
-  const finalImageDataUrls = imageDataUrls.length ? imageDataUrls.slice(0, 4) : payloadImageDataUrls;
-  const finalMaskDataUrl = maskDataUrl || String(body.maskDataUrl || '');
+  const rawImageDataUrls = imageDataUrls.length ? imageDataUrls.slice(0, 4) : payloadImageDataUrls;
+  const finalImageDataUrls = normalizeGenerationImageDataUrls(rawImageDataUrls);
+  const finalMaskDataUrl = normalizeMaskDataUrl(maskDataUrl || String(body.maskDataUrl || ''));
+  const mode = body.mode === 'edit' || finalImageDataUrls.length ? 'edit' : 'generate';
 
   if (prompt.length < 2) throw new Error('请输入提示词');
   if (prompt.length > 4000) throw new Error('提示词最多 4000 字');
@@ -1513,6 +1774,7 @@ function normalizeGenerationRequest({ user, body, source = 'web', imageDataUrls 
     mode,
     quality,
     size,
+    imageModel,
     outputFormat,
     count,
     layout,
@@ -1542,10 +1804,11 @@ async function prepareGenerationTask(options) {
       layout: task.layout,
       storyboardPrompts: task.storyboardPrompts.length ? task.storyboardPrompts : null,
       priceCents: task.priceCents,
-      model: aiSettings({ includeSecret: true }).imageModel,
+      model: task.imageModel || null,
       startedAt: Date.now(),
       metadata: {
         requestedCount: task.count,
+        requestedModel: task.imageModel || null,
         queuedAt: Date.now(),
         asyncWorker: true
       }
@@ -1554,17 +1817,24 @@ async function prepareGenerationTask(options) {
   return { ...task, generation: chargedGeneration.generation };
 }
 
-async function executePreparedGenerationTask(task) {
-  const { generation, mode, quality, size, outputFormat, count, layout, storyboardPrompts, prices, finalImageDataUrls, finalMaskDataUrl, prompt, user } = task;
+async function executePreparedGenerationTask(task, { signal = null } = {}) {
+  const { generation, mode, quality, size, imageModel, outputFormat, count, layout, storyboardPrompts, prices, finalImageDataUrls, finalMaskDataUrl, prompt, user } = task;
+  let runningGeneration = generation;
   try {
-    await updateGeneration(generation.id, {
-      startedAt: generation.startedAt || Date.now(),
+    const workerStartedAt = Date.now();
+    const startUpdate = await updateGenerationIfPending(generation.id, {
+      startedAt: generation.startedAt || workerStartedAt,
       metadata: {
         ...(generation.metadata || {}),
-        workerStartedAt: Date.now(),
-        queuedMs: Math.max(0, Date.now() - Number(generation.createdAt || Date.now()))
+        workerStartedAt,
+        queuedMs: Math.max(0, workerStartedAt - Number(generation.createdAt || workerStartedAt))
       }
     });
+    runningGeneration = startUpdate.generation;
+    if (!startUpdate.updated) {
+      logger.warn({ generationId: generation.id, status: runningGeneration.status }, 'generation task skipped because it is already terminal');
+      return runningGeneration;
+    }
     const result = layout === 'storyboard'
       ? (mode === 'edit'
         ? await editStoryboardImages({
@@ -1574,17 +1844,21 @@ async function executePreparedGenerationTask(task) {
           imageDataUrls: finalImageDataUrls,
           maskDataUrl: finalMaskDataUrl,
           size,
-          outputFormat
+          outputFormat,
+          imageModel,
+          signal
         })
         : await generateStoryboardImages({
           prompts: storyboardPrompts,
           quality,
           size,
-          outputFormat
+          outputFormat,
+          imageModel,
+          signal
         }))
       : (mode === 'edit'
-        ? await editImage({ prompt, quality, imageDataUrl: finalImageDataUrls[0], imageDataUrls: finalImageDataUrls, maskDataUrl: finalMaskDataUrl, size, outputFormat, count })
-        : await generateImage({ prompt, quality, size, outputFormat, count }));
+        ? await editImage({ prompt, quality, imageDataUrl: finalImageDataUrls[0], imageDataUrls: finalImageDataUrls, maskDataUrl: finalMaskDataUrl, size, outputFormat, count, imageModel, signal })
+        : await generateImage({ prompt, quality, size, outputFormat, count, imageModel, signal }));
     const persistedResult = await persistRemoteImages(result, outputFormat);
     const cappedImages = Array.isArray(persistedResult.images)
       ? persistedResult.images
@@ -1612,23 +1886,6 @@ async function executePreparedGenerationTask(task) {
     const refundDiffCents = effectiveReturnedCount > 0 && effectiveReturnedCount < count
       ? money(prices[quality]) * (count - effectiveReturnedCount)
       : 0;
-    let partialRefund = null;
-    let partialRefundActualCents = 0;
-    if (refundDiffCents > 0) {
-      try {
-        const beforeRefund = generationBillingSummary(generation.id, user.id);
-        partialRefund = await refundBalance({
-          userId: user.id,
-          amountCents: refundDiffCents,
-          generationId: generation.id,
-          reason: `部分图片生成失败自动退差额（成功 ${effectiveReturnedCount}/${count} 张）`
-        });
-        const afterRefund = generationBillingSummary(generation.id, user.id);
-        partialRefundActualCents = Math.max(0, afterRefund.refundedAmountCents - beforeRefund.refundedAmountCents);
-      } catch (refundError) {
-        logger.error({ err: refundError, generationId: generation.id }, 'partial refund failed');
-      }
-    }
     const upstreamMetadata = {
       upstreamId: normalizedPersistedResult.upstreamId || null,
       upstreamName: normalizedPersistedResult.upstreamName || null,
@@ -1636,16 +1893,16 @@ async function executePreparedGenerationTask(task) {
       upstreamModel: normalizedPersistedResult.upstreamModel || null
     };
     const generationMetadata = {
-      ...(generation.metadata || {}),
+      ...(runningGeneration.metadata || {}),
       ...Object.fromEntries(Object.entries(upstreamMetadata).filter(([, value]) => value)),
       requestedCount: count,
       returnedCount: effectiveReturnedCount,
       failedCount: Math.max(0, count - effectiveReturnedCount),
       batchFailures: Array.isArray(result.batchFailures) ? result.batchFailures.slice(0, 8) : [],
       upstreamAttempts: Array.isArray(result.upstreamAttempts) ? result.upstreamAttempts.slice(0, 16) : [],
-      partialRefundCents: partialRefundActualCents,
+      partialRefundCents: 0,
       partialRefundRequestedCents: refundDiffCents,
-      partialRefundTransactionId: partialRefund?.id || null,
+      partialRefundTransactionId: null,
       workerFinishedAt: Date.now(),
       ...(normalizedPersistedResult.editFallback ? {
         editFallback: true,
@@ -1654,7 +1911,7 @@ async function executePreparedGenerationTask(task) {
     };
     const finishedAt = Date.now();
     const sourceImages = mode === 'edit' ? generationSourceImagesFromDataUrls(finalImageDataUrls) : [];
-    return updateGeneration(generation.id, {
+    const successUpdate = await finishGenerationIfPending(generation.id, ({ refundTransaction, refundActualCents, refundError }) => ({
       status: 'succeeded',
       imageUrl: normalizedPersistedResult.imageUrl,
       imageBase64: normalizedPersistedResult.imageBase64,
@@ -1662,29 +1919,40 @@ async function executePreparedGenerationTask(task) {
       sourceImages: sourceImages.length ? sourceImages : null,
       storyboardPrompts: normalizedPersistedResult.scenePrompts || (storyboardPrompts.length ? storyboardPrompts : null),
       upstreamStatus: normalizedPersistedResult.upstreamStatus,
-      metadata: generationMetadata,
+      metadata: {
+        ...generationMetadata,
+        partialRefundCents: refundActualCents,
+        partialRefundTransactionId: refundTransaction?.id || null,
+        partialRefundError: refundError?.message || null
+      },
       finishedAt,
       durationMs: finishedAt - Number(generation.createdAt || finishedAt)
+    }), {
+      refund: refundDiffCents > 0
+        ? {
+          userId: user.id,
+          amountCents: refundDiffCents,
+          reason: `部分图片生成失败自动退差额（成功 ${effectiveReturnedCount}/${count} 张）`
+        }
+        : null
     });
+    if (successUpdate.refundError) {
+      logger.error({ err: successUpdate.refundError, generationId: generation.id }, 'partial refund failed');
+    }
+    if (!successUpdate.updated) {
+      logger.warn({ generationId: generation.id, status: successUpdate.generation.status }, 'generation success ignored because task is no longer pending');
+    }
+    return successUpdate.generation;
   } catch (error) {
-    let fullRefund = null;
-    let fullRefundActualCents = 0;
-    try {
-      const beforeRefund = generationBillingSummary(generation?.id, user.id);
-      fullRefund = await refundBalance({
-        userId: user.id,
-        amountCents: generation?.priceCents || task.priceCents,
-        generationId: generation?.id,
-        reason: '生成失败自动退款'
-      });
-      const afterRefund = generationBillingSummary(generation?.id, user.id);
-      fullRefundActualCents = Math.max(0, afterRefund.refundedAmountCents - beforeRefund.refundedAmountCents);
-    } catch (refundError) {
-      logger.error({ err: refundError, generationId: generation?.id }, 'refund failed');
+    const currentBeforeRefund = findGenerationById(generation?.id);
+    if (!currentBeforeRefund || currentBeforeRefund.status !== 'pending') {
+      logger.warn({ generationId: generation?.id, status: currentBeforeRefund?.status, err: error }, 'generation failure ignored because task is no longer pending');
+      error.generation = currentBeforeRefund || generation;
+      throw error;
     }
     const finishedAt = Date.now();
     const failedMetadata = {
-      ...(generation.metadata || {}),
+      ...(currentBeforeRefund.metadata || runningGeneration.metadata || generation.metadata || {}),
       requestedCount: count,
       returnedCount: 0,
       failedCount: count,
@@ -1692,65 +1960,105 @@ async function executePreparedGenerationTask(task) {
       upstreamAttempts: Array.isArray(error.upstreamAttempts) ? error.upstreamAttempts.slice(0, 12) : [],
       errorCode: error.code || null,
       errorStatusCode: error.statusCode || null,
-      refundCents: fullRefundActualCents,
-      refundTransactionId: fullRefund?.id || null,
+      refundCents: 0,
+      refundTransactionId: null,
       workerFailedAt: finishedAt
     };
-    error.generation = await updateGeneration(generation.id, {
+    const failedUpdate = await finishGenerationIfPending(generation.id, ({ refundTransaction, refundActualCents, refundError }) => ({
       status: 'failed',
       error: error.message || '生成失败',
-      metadata: failedMetadata,
+      metadata: {
+        ...failedMetadata,
+        refundCents: refundActualCents,
+        refundTransactionId: refundTransaction?.id || null,
+        refundError: refundError?.message || null
+      },
       finishedAt,
       durationMs: finishedAt - Number(generation.createdAt || finishedAt)
+    }), {
+      refund: {
+        userId: user.id,
+        amountCents: generation?.priceCents || task.priceCents,
+        reason: '生成失败自动退款'
+      }
     });
+    if (failedUpdate.refundError) {
+      logger.error({ err: failedUpdate.refundError, generationId: generation?.id }, 'refund failed');
+    }
+    error.generation = failedUpdate.generation;
+    if (!failedUpdate.updated) {
+      logger.warn({ generationId: generation.id, status: failedUpdate.generation.status }, 'generation failure ignored because task is no longer pending after refund attempt');
+    }
     throw error;
   }
 }
 
 async function runGenerationTask(options) {
-  const task = await prepareGenerationTask(options);
-  return executePreparedGenerationTask(task);
+  const job = await prepareGenerationTaskWithWorkerSlot(options);
+  try {
+    const generation = await executeGenerationJobWithDeadline(job);
+    const terminalStatus = generation?.status === 'failed' ? 'failed' : 'succeeded';
+    if (terminalStatus === 'failed') generationJobsFailed += 1;
+    else generationJobsFinished += 1;
+    job.status = terminalStatus;
+    job.generationId = generation?.id || job.generationId;
+    return generation;
+  } catch (error) {
+    generationJobsFailed += 1;
+    job.status = 'failed';
+    job.error = publicGenerationError(error?.message || '生成失败');
+    throw error;
+  } finally {
+    generationJobs.delete(job.id);
+    activeGenerationJobs = Math.max(0, activeGenerationJobs - 1);
+    setTimeout(pumpGenerationQueue, 0);
+  }
 }
 
 async function failPreparedGenerationTask(task, error, { reason = '生成任务启动失败，已自动退款', metadata = {} } = {}) {
   if (!task?.generation?.id) return null;
   const generation = task.generation;
-  let refund = null;
-  let refundActualCents = 0;
-  try {
-    const beforeRefund = generationBillingSummary(generation.id, task.user?.id || generation.userId);
-    refund = await refundBalance({
-      userId: generation.userId || task.user?.id,
-      amountCents: generation.priceCents || task.priceCents,
-      generationId: generation.id,
-      reason
+  const currentBeforeRefund = findGenerationById(generation.id);
+  if (!currentBeforeRefund || currentBeforeRefund.status !== 'pending') {
+    await deleteGenerationJob(generation.id).catch((deleteError) => {
+      logger.error({ err: deleteError, generationId: generation.id }, 'terminal startup failed job cleanup failed');
     });
-    const afterRefund = generationBillingSummary(generation.id, task.user?.id || generation.userId);
-    refundActualCents = Math.max(0, afterRefund.refundedAmountCents - beforeRefund.refundedAmountCents);
-  } catch (refundError) {
-    logger.error({ err: refundError, generationId: generation.id }, 'startup refund failed');
+    return currentBeforeRefund || generation;
   }
   const finishedAt = Date.now();
-  const failed = await updateGeneration(generation.id, {
+  const failedUpdate = await finishGenerationIfPending(generation.id, ({ refundTransaction, refundActualCents, refundError }) => ({
     status: 'failed',
     error: error?.message || reason,
     metadata: {
-      ...(generation.metadata || {}),
+      ...(currentBeforeRefund.metadata || generation.metadata || {}),
       requestedCount: task.count,
       returnedCount: 0,
       failedCount: task.count,
       startupFailure: true,
       refundCents: refundActualCents,
-      refundTransactionId: refund?.id || null,
+      refundTransactionId: refundTransaction?.id || null,
+      refundError: refundError?.message || null,
       ...metadata
     },
     finishedAt,
     durationMs: finishedAt - Number(generation.createdAt || finishedAt)
+  }), {
+    refund: {
+      userId: generation.userId || task.user?.id,
+      amountCents: generation.priceCents || task.priceCents,
+      reason
+    }
   });
+  if (failedUpdate.refundError) {
+    logger.error({ err: failedUpdate.refundError, generationId: generation.id }, 'startup refund failed');
+  }
+  if (!failedUpdate.updated) {
+    logger.warn({ generationId: generation.id, status: failedUpdate.generation.status }, 'startup failure ignored because task is no longer pending');
+  }
   await deleteGenerationJob(generation.id).catch((deleteError) => {
     logger.error({ err: deleteError, generationId: generation.id }, 'startup failed job cleanup failed');
   });
-  return failed;
+  return failedUpdate.generation;
 }
 
 function initGenerationJobStore() {
@@ -1830,9 +2138,14 @@ function initGenerationJobStore() {
         ORDER BY priority ASC, created_at ASC
       `),
       activePayloads: generationJobDb.prepare(`
-        SELECT generation_id, status, lease_owner, lease_until, payload FROM generation_jobs
+        SELECT generation_id, status, lease_owner, lease_until, created_at, started_at, payload FROM generation_jobs
         WHERE status IN ('queued', 'running')
         ORDER BY priority ASC, created_at ASC
+      `),
+      get: generationJobDb.prepare(`
+        SELECT generation_id, status, lease_owner, lease_until, created_at, started_at
+        FROM generation_jobs
+        WHERE generation_id = ?
       `),
       counts: generationJobDb.prepare(`
         SELECT status, COUNT(*) AS count FROM generation_jobs GROUP BY status
@@ -1856,10 +2169,10 @@ function generationJobSqliteCounts() {
 }
 
 function upsertGenerationJobRecord(task, payload, status = 'queued') {
-  if (!generationJobStatements?.upsert) return;
+  if (!generationJobStatements?.upsert) return true;
   const now = Date.now();
   try {
-    generationJobStatements.upsert.run(
+    const result = generationJobStatements.upsert.run(
       task.generation.id,
       task.generation.userId || task.user.id,
       status,
@@ -1874,8 +2187,29 @@ function upsertGenerationJobRecord(task, payload, status = 'queued') {
       null,
       null
     );
+    return Number(result.changes || 0) > 0;
   } catch (error) {
     logger.error({ err: error, generationId: task.generation?.id }, 'generation job sqlite upsert failed');
+    return false;
+  }
+}
+
+function getGenerationJobRecord(generationId) {
+  if (!generationJobStatements?.get || !generationId) return null;
+  try {
+    const row = generationJobStatements.get.get(generationId);
+    if (!row) return null;
+    return {
+      generationId: row.generation_id,
+      status: row.status,
+      leaseOwner: row.lease_owner || null,
+      leaseUntil: Number(row.lease_until || 0) || null,
+      createdAt: Number(row.created_at || 0) || null,
+      startedAt: Number(row.started_at || 0) || null
+    };
+  } catch (error) {
+    logger.error({ err: error, generationId }, 'generation job sqlite get failed');
+    return null;
   }
 }
 
@@ -1952,6 +2286,8 @@ function listSqliteGenerationJobRecords() {
             status: row.status,
             leaseOwner: row.lease_owner || null,
             leaseUntil: Number(row.lease_until || 0) || null,
+            createdAt: Number(row.created_at || 0) || null,
+            startedAt: Number(row.started_at || 0) || null,
             record: JSON.parse(row.payload)
           };
         } catch (error) {
@@ -1974,10 +2310,12 @@ function generationQueueStats() {
     disabled: generationWorkersDisabled,
     workerId: generationWorkerId,
     leaseMs: generationJobLeaseMs,
-    heartbeatMs: generationJobHeartbeatMs,
-    limits: {
-      maxPersisted: maxPersistedGenerationJobs,
-      maxPending: maxPendingGenerations,
+      heartbeatMs: generationJobHeartbeatMs,
+      timeoutMs: generationJobTimeoutMs,
+      queuedTimeoutMs: generationJobQueuedTimeoutMs,
+      limits: {
+        maxPersisted: maxPersistedGenerationJobs,
+        maxPending: maxPendingGenerations,
       maxPendingPerUser: maxPendingGenerationsPerUser
     },
     queued: generationQueue.length,
@@ -2025,13 +2363,16 @@ async function activeGenerationJobStats({ userId = null, cleanupStale = true } =
 
 async function ensureGenerationCapacity(userId) {
   const activeJobs = await activeGenerationJobStats({ userId });
+  const pending = generationPendingStats({ userId });
+  const activeTotal = Math.max(activeJobs.total, pending.total);
+  const activeUser = Math.max(activeJobs.user, pending.user);
   const overload = [];
-  if (activeJobs.total >= maxPersistedGenerationJobs) overload.push('persisted_jobs');
-  if (activeJobs.total >= maxPendingGenerations) overload.push('global_pending');
-  if (activeJobs.user >= maxPendingGenerationsPerUser) overload.push('user_pending');
+  if (activeTotal >= maxPersistedGenerationJobs) overload.push('persisted_jobs');
+  if (activeTotal >= maxPendingGenerations) overload.push('global_pending');
+  if (activeUser >= maxPendingGenerationsPerUser) overload.push('user_pending');
   if (!overload.length) return null;
   const reason = overload.includes('user_pending')
-    ? `你当前已有 ${activeJobs.user} 个生成任务在排队，请等完成后再提交。`
+    ? `你当前已有 ${activeUser} 个生成任务在排队，请等完成后再提交。`
     : '当前生成队列较忙，请稍后再试。';
   return {
     success: false,
@@ -2041,11 +2382,105 @@ async function ensureGenerationCapacity(userId) {
     queue: {
       ...generationQueueStats(),
       persisted: activeJobs.total,
-      pending: activeJobs.total,
-      userPending: activeJobs.user,
+      pending: activeTotal,
+      userPending: activeUser,
       staleJobRecordsCleaned: activeJobs.stale
     }
   };
+}
+
+async function withGenerationAdmissionLock(callback) {
+  const previous = generationAdmissionLock.catch(() => {});
+  let release = () => {};
+  generationAdmissionLock = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await callback();
+  } finally {
+    release();
+  }
+}
+
+function throwGenerationCapacityError(capacityError) {
+  if (!capacityError) return;
+  const error = new Error(capacityError.message || '当前生成队列较忙，请稍后再试。');
+  error.statusCode = 429;
+  error.code = capacityError.code || 'generation_queue_busy';
+  error.queue = capacityError.queue || null;
+  error.overload = capacityError.overload || [];
+  throw error;
+}
+
+async function prepareGenerationTaskWithCapacity(options) {
+  return withGenerationAdmissionLock(async () => {
+    throwGenerationCapacityError(await ensureGenerationCapacity(options?.user?.id));
+    return prepareGenerationTask(options);
+  });
+}
+
+function generationWorkerCapacityError() {
+  return {
+    success: false,
+    code: 'generation_workers_busy',
+    message: '当前生图通道正在处理其他任务，请稍后再试。',
+    overload: ['worker_concurrency'],
+    queue: generationQueueStats()
+  };
+}
+
+async function prepareGenerationTaskWithWorkerSlot(options) {
+  return withGenerationAdmissionLock(async () => {
+    throwGenerationCapacityError(await ensureGenerationCapacity(options?.user?.id));
+    throwGenerationCapacityError(activeGenerationJobs >= maxGenerationWorkers ? generationWorkerCapacityError() : null);
+    activeGenerationJobs += 1;
+    try {
+      const task = await prepareGenerationTask(options);
+      const generationId = task.generation.id;
+      const startedAt = Date.now();
+      const job = {
+        id: generationId,
+        task,
+        status: 'running',
+        createdAt: Number(task.generation.createdAt || startedAt) || startedAt,
+        started: true,
+        startedAt,
+        deadlineAt: startedAt + generationJobTimeoutMs,
+        generationId,
+        transient: true
+      };
+      generationJobs.set(generationId, job);
+      generationJobsStarted += 1;
+      return job;
+    } catch (error) {
+      activeGenerationJobs = Math.max(0, activeGenerationJobs - 1);
+      setTimeout(pumpGenerationQueue, 0);
+      throw error;
+    }
+  });
+}
+
+async function admitQueuedGenerationTask(options, { reusePostId = '' } = {}) {
+  return withGenerationAdmissionLock(async () => {
+    throwGenerationCapacityError(await ensureGenerationCapacity(options?.user?.id));
+    const task = await prepareGenerationTask(options);
+    try {
+      if (reusePostId) {
+        await updateGeneration(task.generation.id, { reuseSourcePostId: reusePostId });
+        task.generation.reuseSourcePostId = reusePostId;
+      }
+      await saveGenerationJob(task);
+      enqueueGenerationTask(task);
+      return task;
+    } catch (queueError) {
+      await failPreparedGenerationTask(task, queueError, {
+        reason: '生成任务入队失败，已自动退款',
+        metadata: { queueFailure: true }
+      });
+      throw queueError;
+    }
+  });
 }
 
 function pumpGenerationQueue() {
@@ -2054,6 +2489,22 @@ function pumpGenerationQueue() {
     const job = generationQueue.shift();
     if (!job || job.started) continue;
     if (!claimGenerationJobRecord(job.id)) {
+      const record = getGenerationJobRecord(job.id);
+      if (generationJobStatements?.claim && !record) {
+        const missingRecordError = new Error('生成任务队列索引丢失，已自动退款，请重新生成');
+        failPreparedGenerationTask(job.task, missingRecordError, {
+          reason: missingRecordError.message,
+          metadata: { queueIndexMissing: true }
+        }).catch((error) => {
+          logger.error({ err: error, generationId: job.id }, 'missing generation job record refund failed');
+        }).finally(() => {
+          generationJobs.delete(job.id);
+          deleteGenerationJob(job.id).catch((error) => {
+            logger.error({ err: error, generationId: job.id }, 'missing generation job cleanup failed');
+          });
+        });
+        continue;
+      }
       setTimeout(() => {
         if (!generationJobs.has(job.id)) return;
         generationQueue.push(job);
@@ -2062,35 +2513,89 @@ function pumpGenerationQueue() {
       continue;
     }
     job.started = true;
+    job.startedAt = Date.now();
+    job.deadlineAt = job.startedAt + generationJobTimeoutMs;
     activeGenerationJobs += 1;
     generationJobsStarted += 1;
     const heartbeat = setInterval(() => {
       heartbeatGenerationJobRecord(job.id);
     }, generationJobHeartbeatMs);
     heartbeat.unref?.();
-    executePreparedGenerationTask(job.task)
+    executeGenerationJobWithDeadline(job)
       .then((generation) => {
-        generationJobsFinished += 1;
-        job.status = 'succeeded';
-        job.generationId = generation.id;
-        markGenerationJobRecordFinished(generation.id, 'succeeded');
-        return deleteGenerationJob(generation.id);
+        const generationId = generation?.id || job.task?.generation?.id || job.id;
+        const terminalStatus = generation?.status === 'failed' ? 'failed' : 'succeeded';
+        if (terminalStatus === 'failed') generationJobsFailed += 1;
+        else generationJobsFinished += 1;
+        job.status = terminalStatus;
+        job.generationId = generationId;
+        markGenerationJobRecordFinished(generationId, terminalStatus, generation?.error || '');
+        return deleteGenerationJob(generationId).catch((error) => {
+          logger.error({ err: error, generationId }, 'generation job cleanup failed');
+        });
       })
       .catch((error) => {
+        const generationId = job.task?.generation?.id || job.id;
         generationJobsFailed += 1;
         job.status = 'failed';
         job.error = publicGenerationError(error?.message || '生成失败');
-        markGenerationJobRecordFinished(job.task?.generation?.id, 'failed', error?.message || '生成失败');
-        logger.error({ err: error, generationId: job.task?.generation?.id }, 'async generation job failed');
-        return deleteGenerationJob(job.task?.generation?.id).catch((deleteError) => {
-          logger.error({ err: deleteError, generationId: job.task?.generation?.id }, 'generation job cleanup failed');
+        markGenerationJobRecordFinished(generationId, 'failed', error?.message || '生成失败');
+        logger.error({ err: error, generationId }, 'async generation job failed');
+        return deleteGenerationJob(generationId).catch((deleteError) => {
+          logger.error({ err: deleteError, generationId }, 'generation job cleanup failed');
         });
       })
       .finally(() => {
         clearInterval(heartbeat);
+        generationJobs.delete(job.id);
         activeGenerationJobs = Math.max(0, activeGenerationJobs - 1);
         setTimeout(pumpGenerationQueue, 0);
       });
+  }
+}
+
+function generationJobTimeoutError(task, startedAt = Date.now()) {
+  const minutes = Math.max(1, Math.round(generationJobTimeoutMs / 60_000));
+  const error = new Error(`生成任务超过 ${minutes} 分钟仍未完成，已自动退款，请稍后重试。`);
+  error.code = 'GENERATION_JOB_TIMEOUT';
+  error.startedAt = startedAt;
+  error.timeoutMs = generationJobTimeoutMs;
+  error.generationId = task?.generation?.id || null;
+  return error;
+}
+
+async function executeGenerationJobWithDeadline(job) {
+  const startedAt = job.startedAt || Date.now();
+  let timeoutId = null;
+  const controller = new AbortController();
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(async () => {
+      const timeoutError = generationJobTimeoutError(job.task, startedAt);
+      controller.abort(timeoutError);
+      try {
+        timeoutError.generation = await failPreparedGenerationTask(job.task, timeoutError, {
+          reason: timeoutError.message,
+          metadata: {
+            jobTimeout: true,
+            jobTimeoutMs: generationJobTimeoutMs,
+            jobStartedAt: startedAt
+          }
+        });
+      } catch (refundError) {
+        timeoutError.refundError = refundError;
+        logger.error({ err: refundError, generationId: job.id }, 'timed out generation refund failed');
+      }
+      reject(timeoutError);
+    }, generationJobTimeoutMs);
+    timeoutId.unref?.();
+  });
+  try {
+    return await Promise.race([
+      executePreparedGenerationTask(job.task, { signal: controller.signal }),
+      timeoutPromise
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
@@ -2133,6 +2638,7 @@ function serializeGenerationTask(task) {
     mode: task.mode,
     quality: task.quality,
     size: task.size,
+    imageModel: task.imageModel,
     outputFormat: task.outputFormat,
     count: task.count,
     layout: task.layout,
@@ -2149,6 +2655,13 @@ function hydrateGenerationTask(record) {
   const user = findUserById(generation.userId);
   if (!user || user.status !== 'active') return null;
   const quality = normalizeApiQuality(record.quality || generation.quality);
+  const layout = record.layout === 'storyboard' ? 'storyboard' : 'single';
+  const storyboardPrompts = Array.isArray(record.storyboardPrompts) ? record.storyboardPrompts.slice(0, 4) : [];
+  const rawCount = Math.max(1, Math.min(4, Math.trunc(Number(record.count || generation.count || storyboardPrompts.length || 1)) || 1));
+  const count = layout === 'storyboard' ? Math.max(1, Math.min(4, storyboardPrompts.length || rawCount)) : normalizeCount(rawCount);
+  const priceCents = Number(record.priceCents || generation.priceCents || 0);
+  const currentPrices = billingPrices();
+  const originalUnitPriceCents = count > 0 && priceCents > 0 ? Math.round(priceCents / count) : 0;
   return {
     user,
     source: record.source || generation.source || 'web',
@@ -2156,12 +2669,16 @@ function hydrateGenerationTask(record) {
     mode: record.mode === 'edit' ? 'edit' : generation.mode === 'edit' ? 'edit' : 'generate',
     quality,
     size: normalizeSize(record.size || generation.size),
+    imageModel: normalizeRequestedImageModel(record.imageModel || generation.model),
     outputFormat: normalizeOutputFormatForSize(record.outputFormat || generation.outputFormat, record.size || generation.size),
-    count: normalizeCount(record.count || generation.count),
-    layout: record.layout === 'storyboard' ? 'storyboard' : 'single',
-    storyboardPrompts: Array.isArray(record.storyboardPrompts) ? record.storyboardPrompts.slice(0, 4) : [],
-    prices: billingPrices(),
-    priceCents: Number(record.priceCents || generation.priceCents || 0),
+    count,
+    layout,
+    storyboardPrompts,
+    prices: {
+      ...currentPrices,
+      [quality]: originalUnitPriceCents || currentPrices[quality]
+    },
+    priceCents,
     finalImageDataUrls: Array.isArray(record.finalImageDataUrls) ? record.finalImageDataUrls.slice(0, 4) : [],
     finalMaskDataUrl: String(record.finalMaskDataUrl || ''),
     generation
@@ -2175,7 +2692,10 @@ async function saveGenerationJob(task) {
   const payload = serializeGenerationTask(task);
   await fs.writeFile(tmpPath, JSON.stringify(payload, null, 2));
   await fs.rename(tmpPath, jobPath);
-  upsertGenerationJobRecord(task, payload);
+  if (!upsertGenerationJobRecord(task, payload)) {
+    await fs.unlink(jobPath).catch(() => {});
+    throw new Error('生成任务队列索引写入失败');
+  }
   await listPersistedGenerationJobIds();
 }
 
@@ -2185,6 +2705,28 @@ async function deleteGenerationJob(generationId) {
     persistedGenerationJobCount = Math.max(0, persistedGenerationJobCount - 1);
   } catch {}
   deleteGenerationJobRecord(generationId);
+}
+
+async function removeGenerationJobs(generationIds, { reason = 'generation jobs removed' } = {}) {
+  const ids = [...new Set((generationIds || []).map((id) => String(id || '')).filter(Boolean))];
+  if (!ids.length) return [];
+  const idSet = new Set(ids);
+  for (let index = generationQueue.length - 1; index >= 0; index -= 1) {
+    const jobId = generationQueue[index]?.id || generationQueue[index]?.generationId;
+    if (idSet.has(String(jobId || ''))) generationQueue.splice(index, 1);
+  }
+  ids.forEach((id) => {
+    const job = generationJobs.get(id);
+    if (job) {
+      job.status = 'cancelled';
+      job.error = reason;
+    }
+    generationJobs.delete(id);
+  });
+  await Promise.all(ids.map((id) => deleteGenerationJob(id).catch((error) => {
+    logger.error({ err: error, generationId: id }, 'generation job removal failed');
+  })));
+  return ids;
 }
 
 async function refundOrphanedGenerationJob(generationId, error, reason = '后台任务恢复失败，已自动退款，请重新生成') {
@@ -2252,7 +2794,11 @@ async function recoverGenerationJobs() {
         recoveredAt: Date.now()
         }
       });
-      upsertGenerationJobRecord(task, serializeGenerationTask(task));
+      if (!upsertGenerationJobRecord(task, serializeGenerationTask(task))) {
+        await refundOrphanedGenerationJob(item.generationId, new Error('后台任务队列索引恢复失败'));
+        await deleteGenerationJob(item.generationId);
+        continue;
+      }
       enqueueGenerationTask(task);
       recovered += 1;
       recoveredIds.add(item.generationId);
@@ -2279,14 +2825,25 @@ async function listPersistedGenerationJobIds() {
 }
 
 function generationJobIdsProtectedFromStaleSweep() {
-  if (generationWorkersDisabled) return [];
   const now = Date.now();
   const protectedIds = new Set();
   for (const [generationId, job] of generationJobs.entries()) {
-    if (job?.started) protectedIds.add(String(generationId));
+    if (!job || ['succeeded', 'failed'].includes(job.status)) continue;
+    const createdAt = Number(job.createdAt || job.task?.generation?.createdAt || now) || now;
+    const timeoutAt = job.started
+      ? Number(job.deadlineAt || (Number(job.startedAt || now) + generationJobTimeoutMs))
+      : createdAt + generationJobQueuedTimeoutMs;
+    if (timeoutAt > now) protectedIds.add(String(generationId));
   }
+  if (generationWorkersDisabled) return [...protectedIds];
   for (const item of listSqliteGenerationJobRecords()) {
-    if (item.status === 'running' && item.leaseUntil && item.leaseUntil > now) {
+    const createdAt = Number(item.createdAt || item.record?.savedAt || now) || now;
+    const startedAt = Number(item.startedAt || createdAt) || createdAt;
+    const timeoutAt = item.status === 'running'
+      ? startedAt + generationJobTimeoutMs
+      : createdAt + generationJobQueuedTimeoutMs;
+    if (timeoutAt <= now) continue;
+    if (item.status === 'queued' || (item.status === 'running' && item.leaseUntil && item.leaseUntil > now)) {
       protectedIds.add(String(item.generationId));
     }
   }
@@ -2363,6 +2920,7 @@ app.get('/api/openapi.json', (req, res) => {
           required: ['prompt'],
           properties: {
             prompt: { type: 'string', minLength: 2, maxLength: 4000 },
+            model: { type: 'string', description: 'Optional image model configured by the administrator.' },
             quality: { type: 'string', enum: ['1k', '2k', 'standard', 'high'], default: '2k' },
             size: { type: 'string', enum: supportedSizes, default: '1024x1024' },
             output_format: { type: 'string', enum: ['jpeg', 'png', 'webp'], default: 'jpeg' },
@@ -2505,16 +3063,24 @@ app.post('/api/auth/logout', async (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/me', (req, res) => {
+app.get('/api/me', async (req, res) => {
+  const imageModels = await refreshAvailableImageModels().catch(() => availableImageModels());
   res.json({
     success: true,
     user: sanitizeUser(req.user),
     prices: publicPrices(),
+    billing: billingSettings(),
     qualities: supportedQualities,
     sizes: supportedSizes,
+    imageModels,
     outputFormats: ['jpeg', 'png', 'webp'],
     counts: [1, 2, 4]
   });
+});
+
+app.get('/api/image-models', requireUser, async (_req, res) => {
+  const imageModels = await refreshAvailableImageModels({ force: true }).catch(() => availableImageModels());
+  res.json({ success: true, imageModels });
 });
 
 app.get('/api/api-keys', requireUser, (req, res) => {
@@ -2545,6 +3111,8 @@ app.get('/api/history', requireUser, (req, res) => {
   const mode = ['all', 'generate', 'edit'].includes(String(req.query.mode || 'all')) ? String(req.query.mode || 'all') : 'all';
   const requestedLimit = Number.parseInt(String(req.query.limit ?? '50'), 10);
   const limit = Math.max(0, Math.min(100, Number.isFinite(requestedLimit) ? requestedLimit : 50));
+  const requestedOffset = Number.parseInt(String(req.query.offset ?? '0'), 10);
+  const offset = Math.max(0, Number.isFinite(requestedOffset) ? requestedOffset : 0);
   const mine = db.generations
     .filter((item) => item.userId === req.user.id)
     .filter(historyVisibleToUser)
@@ -2553,18 +3121,27 @@ app.get('/api/history', requireUser, (req, res) => {
     .filter((item) => historyMatchesStatus(item, status))
     .filter((item) => historyMatchesMode(item, mode))
     .filter((item) => historyMatchesQuery(item, req.query.q));
+  const generations = limit ? filtered.slice(offset, offset + limit) : [];
+  const nextOffset = offset + generations.length;
   res.json({
     success: true,
     total: filtered.length,
-    returned: limit ? Math.min(limit, filtered.length) : 0,
+    returned: generations.length,
+    offset,
+    limit,
+    nextOffset,
+    hasMore: Boolean(limit && nextOffset < filtered.length),
     deletableCount: historyDeletableCount(mine),
-    generations: limit ? filtered.slice(0, limit) : []
+    generations
   });
 });
 
-app.get('/api/history/:id/image/:index?', requireUser, async (req, res) => {
+app.get('/api/history/:id/image/:index?', async (req, res) => {
+  const viewer = req.user || req.apiUser;
+  if (!viewer) return res.status(401).json({ success: false, message: '请先登录或提供有效 API Key' });
+  if (viewer.status !== 'active') return res.status(403).json({ success: false, message: '账号已禁用' });
   const db = snapshot();
-  const generation = db.generations.find((item) => item.id === req.params.id && item.userId === req.user.id && historyVisibleToUser(item));
+  const generation = db.generations.find((item) => item.id === req.params.id && item.userId === viewer.id && historyVisibleToUser(item));
   if (!generation) return res.status(404).json({ success: false, message: '历史记录不存在' });
   const image = pickHistoryImage(generation, req.params.index);
   if (!image) return res.status(404).json({ success: false, message: '历史图片不存在' });
@@ -2584,6 +3161,20 @@ app.get('/api/history/:id/image/:index?', requireUser, async (req, res) => {
     });
   }
   return res.status(404).json({ success: false, message: '历史图片不存在' });
+});
+
+app.get('/api/history/:id/source/:index?', async (req, res) => {
+  const viewer = req.user || req.apiUser;
+  if (!viewer) return res.status(401).json({ success: false, message: '请先登录或提供有效 API Key' });
+  if (viewer.status !== 'active') return res.status(403).json({ success: false, message: '账号已禁用' });
+  const db = snapshot();
+  const generation = db.generations.find((item) => item.id === req.params.id && item.userId === viewer.id && historyVisibleToUser(item));
+  if (!generation) return res.status(404).json({ success: false, message: '历史记录不存在' });
+  return sendGenerationSourceImage(req, res, generation, req.params.index, {
+    cacheControl: 'private, max-age=86400',
+    missingMessage: '历史源图不存在',
+    readErrorMessage: '历史源图读取失败'
+  });
 });
 
 async function sendGenerationImage(req, res, generation, index, options = {}) {
@@ -2622,7 +3213,9 @@ async function sendGenerationImage(req, res, generation, index, options = {}) {
 
 async function sendGenerationSourceImage(_req, res, generation, index, options = {}) {
   const image = pickGenerationSourceImage(generation, index);
-  if (!image) return res.status(404).json({ success: false, message: '源图不存在' });
+  const missingMessage = options.missingMessage || '源图不存在';
+  const readErrorMessage = options.readErrorMessage || '源图读取失败';
+  if (!image) return res.status(404).json({ success: false, message: missingMessage });
   const cacheControl = options.cacheControl || 'private, no-cache, max-age=0';
   const buffer = Buffer.from(image.imageBase64 || '', 'base64');
   if (buffer.length) {
@@ -2634,11 +3227,11 @@ async function sendGenerationSourceImage(_req, res, generation, index, options =
     return proxyImageUrl(res, image.imageUrl, {
       fallbackType: image.mimeType,
       cacheControl,
-      missingMessage: '源图不存在',
-      readErrorMessage: '源图读取失败'
+      missingMessage,
+      readErrorMessage
     });
   }
-  return res.status(404).json({ success: false, message: '源图不存在' });
+  return res.status(404).json({ success: false, message: missingMessage });
 }
 
 app.get('/api/community/generations/:id/preview/:index?', async (req, res) => {
@@ -2661,13 +3254,16 @@ app.get('/api/community/generations/:id/source/:index?', async (req, res) => {
   const generation = db.generations.find((item) => item.id === req.params.id);
   if (!generation) return res.status(404).json({ success: false, message: '源图不存在' });
   const requestedIndex = Math.trunc(Number(req.params.index || 0));
-  const sourceImages = generationSourceImages(generation);
+  const sourceImages = generationSourceImages(generation, { scope: 'community' });
   const sourceExists = sourceImages.some((image) => image.displayIndex === requestedIndex);
   if (!sourceExists) return res.status(404).json({ success: false, message: '源图不存在' });
   const post = db.communityPosts.find((item) => item.generationId === generation.id && item.status === 'published');
   if (!post) return res.status(404).json({ success: false, message: '作品未公开' });
+  if (!canViewCommunitySourceImages(post, req)) {
+    return res.status(403).json({ success: false, message: '作者未公开参考源图' });
+  }
   return sendGenerationSourceImage(req, res, generation, req.params.index, {
-    cacheControl: 'public, max-age=86400, stale-while-revalidate=604800'
+    cacheControl: post.showSourceImages ? 'public, max-age=86400, stale-while-revalidate=604800' : 'private, max-age=300'
   });
 });
 
@@ -2771,7 +3367,8 @@ app.post('/api/community/posts', requireUser, communityWriteLimiter, async (req,
       imageIndexes: req.body.imageIndexes,
       title: String(req.body.title || ''),
       description: String(req.body.description || ''),
-      tags: req.body.tags
+      tags: req.body.tags,
+      showSourceImages: req.body.showSourceImages === true || req.body.showSourceImages === 'true' || req.body.showSourceImages === '1'
     });
     const db = snapshot();
     const publishedPost = db.communityPosts.find((item) => item.id === post.id);
@@ -2798,7 +3395,10 @@ app.patch('/api/community/posts/:id', requireUser, communityWriteLimiter, async 
       userId: req.user.id,
       title: String(req.body.title || ''),
       description: String(req.body.description || ''),
-      tags: req.body.tags
+      tags: req.body.tags,
+      showSourceImages: Object.prototype.hasOwnProperty.call(req.body || {}, 'showSourceImages')
+        ? (req.body.showSourceImages === true || req.body.showSourceImages === 'true' || req.body.showSourceImages === '1')
+        : undefined
     });
     const db = snapshot();
     const updatedPost = db.communityPosts.find((item) => item.id === post.id && item.status === 'published');
@@ -3104,27 +3704,14 @@ async function handleWebGenerate(req, res) {
       if (generationWorkersDisabled) {
         return res.status(503).json({ success: false, message: '后台生图队列暂时关闭，本次未扣费，请稍后重试。' });
       }
-      const capacityError = await ensureGenerationCapacity(req.user.id);
-      if (capacityError) return res.status(429).json(capacityError);
-      const task = await prepareGenerationTask({ user: req.user, body: req.body, source: 'web' });
-      try {
-        if (reusePostId) {
-          await updateGeneration(task.generation.id, { reuseSourcePostId: reusePostId });
-          task.generation.reuseSourcePostId = reusePostId;
-        }
-        await saveGenerationJob(task);
-        enqueueGenerationTask(task);
-      } catch (queueError) {
-        await failPreparedGenerationTask(task, queueError, {
-          reason: '生成任务入队失败，已自动退款',
-          metadata: { queueFailure: true }
-        });
-        throw queueError;
-      }
+      const task = await admitQueuedGenerationTask(
+        { user: req.user, body: req.body, source: 'web' },
+        { reusePostId }
+      );
       return res.status(202).json({
         success: true,
         queued: true,
-        generation: generationSummary(task.generation),
+        generation: generationSummaryWithBilling(task.generation, req.user.id),
         user: sanitizeUser(findUserById(req.user.id)),
         queue: generationQueueStats()
       });
@@ -3148,15 +3735,16 @@ async function handleWebGenerate(req, res) {
         req.log?.warn({ err: reuseError, postId: reusePostId }, 'community reuse record failed after generation');
       }
     }
-    res.json({ success: true, generation: generationSummary(updated), user: sanitizeUser(findUserById(req.user.id)), reusePost });
+    res.json({ success: true, generation: generationSummaryWithBilling(updated, req.user.id), user: sanitizeUser(findUserById(req.user.id)), reusePost });
   } catch (error) {
     const message = error.message || '生成失败';
-    const statusCode = generationErrorStatus(message);
+    const statusCode = error.statusCode || generationErrorStatus(message);
     res.status(statusCode).json({
       success: false,
       message: publicGenerationError(message),
-      generation: error.generation ? generationSummary(error.generation) : null,
-      user: sanitizeUser(findUserById(req.user.id))
+      generation: error.generation ? generationSummaryWithBilling(error.generation, req.user.id) : null,
+      user: sanitizeUser(findUserById(req.user.id)),
+      queue: error.queue || undefined
     });
   }
 }
@@ -3168,7 +3756,7 @@ app.get('/api/generate/:id', requireUser, (req, res) => {
   }
   res.json({
     success: true,
-    generation: generationSummary(generation),
+    generation: generationSummaryWithBilling(generation, req.user.id),
     user: sanitizeUser(findUserById(req.user.id)),
     queue: generationQueueStats()
   });
@@ -3212,30 +3800,35 @@ app.post('/v1/images/generations', requireApiUser, aiLimiter, async (req, res) =
     });
     res.json(openAiGenerationSummary(req, updated));
   } catch (error) {
-    const statusCode = generationErrorStatus(error.message, 400);
+    const statusCode = error.statusCode || generationErrorStatus(error.message, 400);
     apiError(res, statusCode, publicGenerationError(error.message));
   }
 });
 
-app.post('/v1/images/edits', requireApiUser, aiLimiter, upload.fields([
+const apiEditUpload = upload.fields([
   { name: 'image', maxCount: 4 },
   { name: 'mask', maxCount: 1 }
-]), async (req, res) => {
-  try {
-    const images = Array.isArray(req.files?.image) ? req.files.image.map(fileToDataUrl) : [];
-    const mask = Array.isArray(req.files?.mask) && req.files.mask[0] ? fileToDataUrl(req.files.mask[0]) : '';
-    const updated = await runGenerationTask({
-      user: req.apiUser,
-      body: { ...req.body, mode: 'edit' },
-      source: 'api',
-      imageDataUrls: images,
-      maskDataUrl: mask
-    });
-    res.json(openAiGenerationSummary(req, updated));
-  } catch (error) {
-    const statusCode = generationErrorStatus(error.message, 400);
-    apiError(res, statusCode, publicGenerationError(error.message));
-  }
+]);
+
+app.post('/v1/images/edits', requireApiUser, aiLimiter, (req, res) => {
+  apiEditUpload(req, res, async (uploadError) => {
+    if (uploadError) return apiUploadError(res, uploadError);
+    try {
+      const images = Array.isArray(req.files?.image) ? req.files.image.map(fileToDataUrl) : [];
+      const mask = Array.isArray(req.files?.mask) && req.files.mask[0] ? fileToDataUrl(req.files.mask[0]) : '';
+      const updated = await runGenerationTask({
+        user: req.apiUser,
+        body: { ...req.body, mode: 'edit' },
+        source: 'api',
+        imageDataUrls: images,
+        maskDataUrl: mask
+      });
+      res.json(openAiGenerationSummary(req, updated));
+    } catch (error) {
+      const statusCode = error.statusCode || generationErrorStatus(error.message, 400);
+      apiError(res, statusCode, publicGenerationError(error.message));
+    }
+  });
 });
 
 app.delete('/api/history', requireUser, async (req, res) => {
@@ -3347,7 +3940,7 @@ app.get('/api/admin/overview', requireUser, requireAdmin, (req, res) => {
     redeemCodes: db.redeemCodes.slice(0, 80).map((item) => adminRedeemCodeSummary(item, db)),
     redeemStats: adminRedeemFullStats(db),
     transactions: db.transactions.slice(-100).reverse().map(adminTransactionSummary),
-    generations: db.generations.slice(0, 100).map(generationSummary),
+    generations: db.generations.slice(0, 100).map((generation) => generationSummaryWithBilling(generation, generation.userId)),
     billing: billingSettings(),
     ai: aiSettings(),
     store: storeStats(),
@@ -3402,11 +3995,13 @@ app.put('/api/admin/ai-settings', requireUser, requireAdmin, async (req, res) =>
         imageModel: req.body?.imageModel,
         textUpstreamBaseUrl: req.body?.textUpstreamBaseUrl,
         textUpstreamApiKey: req.body?.textUpstreamApiKey,
+        clearTextUpstreamApiKey: req.body?.clearTextUpstreamApiKey,
         textModel: req.body?.textModel
       },
       operatorId: req.user.id
     });
-    res.json({ success: true, ai: settings });
+    const imageModels = await refreshAvailableImageModels({ force: true }).catch(() => availableImageModels());
+    res.json({ success: true, ai: settings, imageModels });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -3419,6 +4014,7 @@ app.put('/api/admin/billing', requireUser, requireAdmin, async (req, res) => {
         '1k': money(Number(req.body?.prices?.['1k'] ?? req.body?.price1kCents)),
         '2k': money(Number(req.body?.prices?.['2k'] ?? req.body?.price2kCents))
       },
+      purchaseCodeUrl: req.body?.purchaseCodeUrl,
       operatorId: req.user.id
     });
     res.json({ success: true, billing: settings, prices: publicPrices() });
@@ -3504,12 +4100,21 @@ app.post('/api/admin/users', requireUser, requireAdmin, async (req, res) => {
 
 app.patch('/api/admin/users/:id/status', requireUser, requireAdmin, async (req, res) => {
   try {
+    const nextStatus = String(req.body.status || '');
     const user = await adminUpdateUserStatus({
       userId: String(req.params.id || ''),
-      status: String(req.body.status || ''),
+      status: nextStatus,
       operatorId: req.user.id
     });
-    res.json({ success: true, user: sanitizeUser(user) });
+    const cancelledGenerations = nextStatus === 'active'
+      ? []
+      : await failPendingGenerationsForUser({
+        userId: user.id,
+        operatorId: req.user.id,
+        reason: '账号已被管理员停用，未完成的生图任务已取消并退款'
+      });
+    await removeGenerationJobs(cancelledGenerations.map((item) => item.id), { reason: 'user disabled by admin' });
+    res.json({ success: true, user: sanitizeUser(user), cancelledGenerations });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -3534,7 +4139,13 @@ app.delete('/api/admin/users/:id', requireUser, requireAdmin, async (req, res) =
       userId: String(req.params.id || ''),
       operatorId: req.user.id
     });
-    res.json({ success: true, user: sanitizeUser(user) });
+    const cancelledGenerations = await failPendingGenerationsForUser({
+      userId: user.id,
+      operatorId: req.user.id,
+      reason: '账号已被管理员删除，未完成的生图任务已取消并退款'
+    });
+    await removeGenerationJobs(cancelledGenerations.map((item) => item.id), { reason: 'user deleted by admin' });
+    res.json({ success: true, user: sanitizeUser(user), cancelledGenerations });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -3545,7 +4156,7 @@ app.get('/', (_req, res) => {
   res.sendFile(homeHtmlPath);
 });
 
-app.get(['/image', '/image/history', '/image/workspace', '/prompts', '/api-docs', '/developers', '/agent', '/settings', '/admin'], (req, res) => {
+app.get(['/app', '/image', '/image/history', '/image/workspace', '/community', '/prompts', '/api-docs', '/developers', '/agent', '/settings', '/admin', '/admin/:section'], (req, res) => {
   res.setHeader('cache-control', 'no-store');
   sendIndexHtml(req, res).catch((error) => {
     req.log?.error({ err: error }, 'index html render failed');
@@ -3561,6 +4172,7 @@ await recoverRestartPendingGenerations({ skipGenerationIds: await listPersistedG
 const stalePendingGenerationMaxAgeMs = 1000 * 60 * 35;
 const stalePendingEditGenerationMaxAgeMs = 1000 * 60 * 7;
 const stalePendingGenerationSweepMs = 1000 * 60;
+const refundCompensationSweepMs = Math.max(30_000, Math.trunc(Number(process.env.REFUND_COMPENSATION_SWEEP_MS || 60_000)));
 const sweepStalePendingGenerations = async () => {
   try {
     await listPersistedGenerationJobIds();
@@ -3584,6 +4196,19 @@ const sweepStalePendingGenerations = async () => {
 };
 setInterval(sweepStalePendingGenerations, stalePendingGenerationSweepMs).unref();
 sweepStalePendingGenerations();
+
+const sweepPendingGenerationRefunds = async () => {
+  try {
+    const results = await retryPendingGenerationRefunds({ limit: 25 });
+    const recovered = results.filter((item) => item.status === 'refunded');
+    const failed = results.filter((item) => item.status === 'failed');
+    if (recovered.length || failed.length) logger.warn({ recovered, failed }, 'pending generation refund compensation sweep finished');
+  } catch (error) {
+    logger.error({ err: error }, 'pending generation refund compensation sweep failed');
+  }
+};
+setInterval(sweepPendingGenerationRefunds, refundCompensationSweepMs).unref();
+sweepPendingGenerationRefunds();
 
 app.listen(config.port, () => {
   const ai = aiSettings();

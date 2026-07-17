@@ -18,15 +18,22 @@ export function historyHasActiveFilters() {
     || Boolean(state.historySearch.trim());
 }
 
-export function historyQueryString() {
+export function historyQueryString(extra = {}) {
   const params = new URLSearchParams();
   if (state.historyStatusFilter !== 'all') params.set('status', state.historyStatusFilter);
   if (state.historyModeFilter !== 'all') params.set('mode', state.historyModeFilter);
   if (state.historySearch.trim()) params.set('q', state.historySearch.trim());
+  Object.entries(extra).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    params.set(key, String(value));
+  });
   return params.toString();
 }
 
 function historyEmptyMessage() {
+  if (!state.user) {
+    return '登录后可以查看历史图片、生成进度和发布状态。';
+  }
   if (!historyHasActiveFilters() && !state.historyTotal) {
     return '还没有历史记录。创建第一条图片任务后，这里会保存缩略图、提示词和发布状态。';
   }
@@ -65,12 +72,13 @@ export function renderHistoryList() {
   const count = state.historyItems.length;
   const renderLimit = Math.max(baseHistoryRenderLimit, Number(state.historyRenderLimit || baseHistoryRenderLimit));
   const visibleItems = state.historyItems.slice(0, renderLimit);
-  const hasMore = count > visibleItems.length;
+  const localHasMore = count > visibleItems.length;
+  const hasMore = localHasMore || Boolean(state.historyHasMore);
   if ($('historyHint')) {
     $('historyHint').textContent = state.historyTotal > count ? `${count}/${state.historyTotal}` : String(count);
   }
   history.innerHTML = count
-    ? `${visibleItems.map(renderHistoryItem).join('')}${renderHistoryMoreControl(count, visibleItems.length, hasMore)}`
+    ? `${visibleItems.map(renderHistoryItem).join('')}${renderHistoryMoreControl(count, visibleItems.length, { localHasMore, hasMore })}`
     : renderFilteredHistoryEmpty();
   bindHistoryItemClicks();
 }
@@ -80,19 +88,27 @@ export function resetHistoryRenderLimit() {
 }
 
 function extendHistoryRenderLimit() {
+  const currentLimit = Math.max(baseHistoryRenderLimit, Number(state.historyRenderLimit || baseHistoryRenderLimit));
+  if (state.historyItems.length <= currentLimit && state.historyHasMore) {
+    actions.loadMore?.();
+    return;
+  }
   state.historyRenderLimit = Math.min(
     state.historyItems.length,
-    Math.max(baseHistoryRenderLimit, Number(state.historyRenderLimit || baseHistoryRenderLimit)) + historyRenderStep
+    currentLimit + historyRenderStep
   );
   renderHistoryList();
 }
 
-function renderHistoryMoreControl(total, rendered, hasMore) {
+function renderHistoryMoreControl(loaded, rendered, { localHasMore = false, hasMore = false } = {}) {
   if (!hasMore) return '';
+  const remaining = Math.max(0, Number(state.historyTotal || loaded) - (localHasMore ? rendered : loaded));
+  const nextCount = Math.max(1, Math.min(historyRenderStep, remaining || state.historyPageSize || historyRenderStep));
+  const loading = Boolean(state.historyLoadingMore);
   return `
-    <button class="history-more-button" type="button" data-history-action="showMore">
-      继续显示 ${Math.min(historyRenderStep, total - rendered)} 条
-      <span>${rendered}/${total}</span>
+    <button class="history-more-button" type="button" data-history-action="showMore" ${loading ? 'disabled' : ''}>
+      ${loading ? '正在读取更多历史' : `继续显示 ${nextCount} 条`}
+      <span>${rendered}/${state.historyTotal || loaded}</span>
     </button>
   `;
 }
@@ -103,6 +119,7 @@ function renderHistoryItem(item) {
   const safeSrc = escapeHtml(src);
   const placeholderAlt = item.status === 'pending' ? '生成中' : '生成失败';
   const image = src ? `<img src="${safeSrc}" alt="作品" loading="lazy" />` : `<img src="/assets/showcase/hero-studio.svg" alt="${placeholderAlt}" />`;
+  const imageButton = `<button class="history-open-button" type="button" data-history-action="open" data-generation-id="${escapeHtml(item.id)}" aria-label="查看历史作品">${image}</button>`;
   const mode = item.mode === 'edit' ? '图生图' : '文生图';
   const failedMessage = actions.formatGenerateError?.(item.error || '生成失败') || item.error || '生成失败';
   const title = escapeHtml(item.communityPost?.title || trimmedTitle(item.prompt || `${mode} 任务`, 28));
@@ -111,9 +128,11 @@ function renderHistoryItem(item) {
   const refundedAmountCents = Number(item.refundedAmountCents || 0);
   const remainingAmountCents = Math.max(0, Number(item.remainingAmountCents ?? (consumedAmountCents - refundedAmountCents)));
   const chargeText = item.status === 'pending'
-    ? '扣费待确认'
+    ? (consumedAmountCents > 0 ? `已预扣 ${yuan(consumedAmountCents)}` : '等待扣费')
     : item.status === 'failed'
-      ? '未扣费'
+      ? (refundedAmountCents > 0
+        ? (remainingAmountCents > 0 ? `已退 ${yuan(refundedAmountCents)}` : `已退款 ${yuan(refundedAmountCents)}`)
+        : (consumedAmountCents > 0 ? '退款处理中' : '未扣费'))
       : refundedAmountCents > 0
         ? `实扣 ${yuan(remainingAmountCents)}`
         : consumedAmountCents > 0
@@ -122,6 +141,20 @@ function renderHistoryItem(item) {
   const canvasAction = src && item.status !== 'failed' && item.status !== 'pending'
     ? `<button class="history-canvas-button" type="button" data-history-action="canvas" data-generation-id="${escapeHtml(item.id)}">放到画布</button>`
     : '';
+  const reuseAction = item.status !== 'pending'
+    ? `<button class="history-canvas-button" type="button" data-history-action="reuse" data-generation-id="${escapeHtml(item.id)}">复用参数</button>`
+    : '';
+  const primaryAction = item.status === 'pending'
+    ? `<button class="history-canvas-button" type="button" data-history-action="resumePending" data-generation-id="${escapeHtml(item.id)}">继续查看</button>`
+    : item.status === 'succeeded' && item.communityPostId
+      ? `<button class="history-canvas-button" type="button" data-history-action="viewCommunity" data-community-post-id="${escapeHtml(item.communityPostId)}">查看交流区</button>`
+      : item.status === 'succeeded'
+        ? `<button class="history-canvas-button" type="button" data-history-action="publish" data-generation-id="${escapeHtml(item.id)}">上传到交流区</button>`
+        : '';
+  const deleteAction = item.status !== 'pending' && !item.communityPostId
+    ? `<button class="history-canvas-button history-delete-button" type="button" data-history-action="delete" data-generation-id="${escapeHtml(item.id)}">删除</button>`
+    : '';
+  const quickActions = [primaryAction, reuseAction, canvasAction, deleteAction].filter(Boolean).join('');
   const metaLine = `
     <div class="history-stat-line">
       <span class="history-quality-pill">${escapeHtml(qualityText)}</span>
@@ -143,11 +176,11 @@ function renderHistoryItem(item) {
       </div>
     `;
   return `
-    <article class="history-item" data-generation-id="${escapeHtml(item.id)}" tabindex="0" role="button" aria-label="查看历史作品">
-      ${image}
+    <article class="history-item" data-generation-id="${escapeHtml(item.id)}">
+      ${imageButton}
       <div class="history-body">
         ${content}
-        ${canvasAction}
+        ${quickActions ? `<div class="history-quick-actions">${quickActions}</div>` : ''}
       </div>
     </article>
   `;
@@ -161,6 +194,7 @@ function bindHistoryItemClicks() {
     const id = button.dataset.generationId;
     if (button.dataset.historyAction === 'clearFilters') return actions.clearFilters?.();
     if (button.dataset.historyAction === 'showMore') return extendHistoryRenderLimit();
+    if (button.dataset.historyAction === 'open') return actions.openGeneration?.(id);
     if (button.dataset.historyAction === 'delete') return actions.delete?.(id, button);
     if (button.dataset.historyAction === 'reuse') return actions.reuse?.(id);
     if (button.dataset.historyAction === 'resumePending') return actions.resumePending?.(id, state.historyItems.find((entry) => entry.id === id));
@@ -182,13 +216,5 @@ function bindHistoryItemClicks() {
     if (event.target.closest('a, button, summary, details')) return;
     const item = event.target.closest('.history-item');
     if (item && history.contains(item)) actions.openGeneration?.(item.dataset.generationId);
-  });
-  history.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    if (event.target.closest('a, button, summary, details')) return;
-    const item = event.target.closest('.history-item');
-    if (!item || !history.contains(item)) return;
-    event.preventDefault();
-    actions.openGeneration?.(item.dataset.generationId);
   });
 }

@@ -3,16 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070a0c" />
     <title>有鱼生图</title>
     <link rel="icon" href="/assets/site-logo.png?v=2026062925" type="image/png" />
-    <link rel="stylesheet" href="/styles.css?v=2026063011" />
+    <link rel="stylesheet" href="/styles.css?v=2026070804" />
+    <link rel="stylesheet" href="/studio-refactor.css?v=2026071406" />
+    <link rel="stylesheet" href="/scifi-theme.css?v=2026071501" />
   </head>
-  <body data-panel="studio">
+  <body class="studio-layout-v2" data-panel="studio">
     <div id="floatingMenuPortal" aria-hidden="true"></div>
     <div class="studio-shell">
       <aside class="studio-rail" aria-label="主导航">
         <div class="rail-top">
-          <button class="rail-logo" id="themeToggleBtn" type="button" aria-label="切换深浅主题" title="切换深浅主题">
+          <button class="rail-logo" id="themeToggleBtn" type="button" aria-label="返回首页" title="返回首页">
             <img src="/assets/site-logo.png?v=2026062925" alt="" />
           </button>
           <a class="rail-brand" id="railBrandHome" href="/image/history">
@@ -67,6 +70,9 @@
             <h2>历史记录</h2>
           </div>
           <span id="historyHint">0</span>
+          <button class="history-close-button" id="historyCloseBtn" type="button" aria-label="关闭历史记录" title="关闭历史记录">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
         </div>
         <div class="history-actions">
           <button class="new-chat-button" id="newSessionBtn" type="button">
@@ -98,26 +104,27 @@
         <div id="history" class="history sidebar-scrollable"></div>
         <button class="history-resize" id="historyResizeHandle" type="button" aria-label="拖拽调整历史栏宽度" title="拖拽调整历史栏宽度"></button>
       </aside>
+      <button class="history-backdrop" id="historyBackdrop" type="button" aria-label="关闭历史记录" tabindex="-1"></button>
 
       <main class="workspace">
         <header class="workspace-header">
             <div class="workspace-title">
-              <h1>图片工作台</h1>
-              <span class="workspace-badge">image2.0</span>
-              <span class="workspace-badge wallet">用户钱包计费</span>
+              <h1 id="workspaceHeaderTitle">图片工作台</h1>
+              <span class="workspace-badge" id="workspaceHeaderPrimaryBadge">有鱼生图</span>
+              <span class="workspace-badge wallet" id="workspaceHeaderSecondaryBadge">余额与历史同步</span>
             </div>
             <div class="workspace-account">
-              <button class="canvas-entry-button" id="openCanvasBtn" type="button">
+              <button class="canvas-entry-button" id="openCanvasBtn" type="button" data-studio-header-only aria-label="打开无限画布" title="无限画布">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H4z"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="M8 9h8M8 13h5"/></svg>
                 <span>无限画布</span>
               </button>
-              <span class="ready-pill" id="readyPill">
+              <span class="ready-pill" id="readyPill" data-studio-header-only>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                 就绪
               </span>
               <button class="account-pill" id="headerAccountBtn" type="button">登录 / 注册</button>
               <button class="recharge-header-button" id="headerRechargeBtn" type="button" tabindex="-1" aria-hidden="true">兑换码充值</button>
-              <button class="collapse-history-button" id="collapseHistoryBtn" type="button">
+              <button class="collapse-history-button" id="collapseHistoryBtn" type="button" data-studio-header-only>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 9l-3 3 3 3"/></svg>
                 <span>收起历史</span>
               </button>
@@ -129,7 +136,7 @@
             <div class="spark-icon" aria-hidden="true">
               <img src="/assets/site-logo.png?v=2026062925" alt="" />
             </div>
-            <h2>选一个模板，或直接开始创作。</h2>
+            <h2>快捷模板</h2>
             <div class="prompt-tools" id="studioTemplateGrid">
               <button class="prompt-card prompt-rose" data-prompt="周芷若联动宣传图，国风角色联动，红金渐变背景，现代广告构图，人物占比突出，无文字，无水印" type="button">
                 <div class="prompt-cover"><img src="/assets/templates/guofeng-campaign.jpg" alt="" loading="eager" decoding="async" /></div>
@@ -170,52 +177,71 @@
               <em id="generationBannerMeta">请稍等</em>
             </div>
             <div class="composer-toolbar">
+              <div class="model-picker-row">
+                <div class="select-pill model-select" data-select="model">
+                  <button class="select-pill-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="modelMenu">
+                    <span class="spec-label" id="modelLabel"><small>当前模型</small><strong>自动调度</strong></span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  <div class="pill-menu" id="modelMenu" role="listbox" aria-label="选择模型">
+                    <button class="active" data-model="" type="button" role="option" aria-selected="true">自动调度</button>
+                  </div>
+                </div>
+              </div>
               <div class="toolbar-spec-row toolbar-spec-row-primary">
                 <div class="select-pill size-select" data-select="size">
-                  <span class="spec-label" id="sizeLabel"><small>尺寸</small><strong>1024x1024</strong></span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-                  <div class="pill-menu">
-                    <button class="active" data-size="1024x1024" type="button">尺寸 1024 x 1024</button>
-                    <button data-size="1536x1024" type="button">尺寸 1536 x 1024</button>
-                    <button data-size="1024x1536" type="button">尺寸 1024 x 1536</button>
+                  <button class="select-pill-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="sizeMenu">
+                    <span class="spec-label" id="sizeLabel"><small>尺寸</small><strong>1024x1024</strong></span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  <div class="pill-menu" id="sizeMenu" role="listbox" aria-label="选择图片尺寸">
+                    <button class="active" data-size="1024x1024" type="button" role="option" aria-selected="true">1024 x 1024</button>
+                    <button data-size="1536x1024" type="button" role="option" aria-selected="false">1536 x 1024</button>
+                    <button data-size="1024x1536" type="button" role="option" aria-selected="false">1024 x 1536</button>
                   </div>
                 </div>
                 <div class="select-pill quality-select" data-select="quality">
-                  <span class="spec-label" id="qualityLabel"><small>质量</small><strong>2K</strong></span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-                  <div class="pill-menu">
-                    <button data-quality="1k" type="button">质量 1K</button>
-                    <button class="active" data-quality="2k" type="button">质量 2K</button>
+                  <button class="select-pill-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="qualityMenu">
+                    <span class="spec-label" id="qualityLabel"><small>质量</small><strong>2K</strong></span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  <div class="pill-menu" id="qualityMenu" role="listbox" aria-label="选择图片质量">
+                    <button data-quality="1k" type="button" role="option" aria-selected="false">1K</button>
+                    <button class="active" data-quality="2k" type="button" role="option" aria-selected="true">2K</button>
                   </div>
                 </div>
               </div>
               <div class="toolbar-spec-row toolbar-spec-row-secondary">
                 <div class="select-pill count-select" data-select="count">
-                  <span class="spec-label" id="countLabel"><small>数量</small><strong>1</strong></span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-                  <div class="pill-menu">
-                    <button class="active" data-count="1" type="button">数量 1</button>
-                    <button data-count="2" type="button">数量 2</button>
-                    <button data-count="4" type="button">数量 4</button>
+                  <button class="select-pill-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="countMenu">
+                    <span class="spec-label" id="countLabel"><small>数量</small><strong>1</strong></span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  <div class="pill-menu" id="countMenu" role="listbox" aria-label="选择生成数量">
+                    <button class="active" data-count="1" type="button" role="option" aria-selected="true">1 张</button>
+                    <button data-count="2" type="button" role="option" aria-selected="false">2 张</button>
+                    <button data-count="4" type="button" role="option" aria-selected="false">4 张</button>
                   </div>
                 </div>
                 <div class="select-pill format-select" data-select="format">
-                  <span class="spec-label" id="formatLabel"><small>格式</small><strong>JPEG</strong></span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-                  <div class="pill-menu">
-                    <button class="active" data-format="jpeg" type="button">格式 JPEG</button>
-                    <button data-format="png" type="button">格式 PNG</button>
-                    <button data-format="webp" type="button">格式 WebP</button>
+                  <button class="select-pill-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="formatMenu">
+                    <span class="spec-label" id="formatLabel"><small>格式</small><strong>JPEG</strong></span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  <div class="pill-menu" id="formatMenu" role="listbox" aria-label="选择图片格式">
+                    <button class="active" data-format="jpeg" type="button" role="option" aria-selected="true">JPEG</button>
+                    <button data-format="png" type="button" role="option" aria-selected="false">PNG</button>
+                    <button data-format="webp" type="button" role="option" aria-selected="false">WebP</button>
                   </div>
                 </div>
               </div>
             </div>
 
-            <label class="upload-box" id="uploadBox">
+            <button class="upload-box" id="uploadBox" type="button" aria-describedby="uploadBoxHelp">
               <span>上传参考图</span>
-              <small>拖入图片或点击选择，支持常见图片格式，最大 12 兆</small>
-              <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" />
-            </label>
+              <small id="uploadBoxHelp">拖入图片或点击选择，支持常见图片格式，最大 12 兆</small>
+            </button>
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
             <div class="reference-preview" id="referencePreview"></div>
 
             <div class="community-reuse-nudge" id="communityReuseNudge" aria-live="polite">
@@ -227,23 +253,19 @@
               <button class="text-button" id="communityReuseDismissBtn" type="button">关闭</button>
             </div>
             <div class="community-reuse-source-bar" id="communityReuseSourceBar" hidden aria-live="polite"></div>
-            <textarea id="prompt" maxlength="1000" placeholder="描述你想生成的画面"></textarea>
+              <textarea id="prompt" maxlength="1000" placeholder="描述主体、场景、风格与光线"></textarea>
 
             <div class="composer-footer">
               <div class="composer-left-tools">
-                <label class="upload-trigger" for="imageInput">
+                <button class="upload-trigger" id="uploadTriggerBtn" type="button">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8 12 3 7 8"/><path d="M12 3v12"/></svg>
                   <span id="uploadTriggerLabel">上传参考图</span>
-                </label>
+                </button>
                 <button class="text-button prompt-optimize-button" id="optimizePromptBtn" type="button">优化提示词</button>
               </div>
               <div class="composer-feedback-row">
                 <span id="promptCount">0 / 1000</span>
                 <p class="status" id="status"></p>
-              </div>
-              <div class="toolbar-billing-group">
-                <span class="price-chip" id="priceHint">文生图 · 高质量 · JPEG · 1 张 · 2.00 奇点</span>
-                <span class="billing-chip" id="walletChipBtn">钱包计费</span>
               </div>
               <button class="primary-button generate-button" id="generateBtn" type="button" aria-label="提交图片任务">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
@@ -302,7 +324,7 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
                   <input id="promptLibrarySearch" placeholder="搜索作品、作者或标签" />
                 </label>
-                <button class="primary-button community-create-button" id="communityCreateBtn" type="button">生成并发布</button>
+                <button class="primary-button community-create-button" id="communityCreateBtn" type="button">去生成作品</button>
                 <button class="secondary-button" id="communityRefreshBtn" type="button">刷新</button>
               </div>
             </header>
@@ -347,7 +369,7 @@
                 <p>使用 Bearer API Key 调用图片生成接口，费用从对应账号钱包扣除。</p>
               </div>
               <div class="api-doc-actions">
-                <button class="secondary-button" data-copy-text="https://image.twotop.icu/v1/images/generations" type="button">复制地址</button>
+                <button class="secondary-button" data-copy-api-path="/v1/images/generations" type="button">复制地址</button>
                 <a class="secondary-link" href="/api/openapi.json" target="_blank" rel="noreferrer">OpenAPI JSON</a>
               </div>
             </header>
@@ -375,7 +397,7 @@
                 <article class="api-doc-block">
                   <span>文生图</span>
                   <h3>POST /v1/images/generations</h3>
-                  <pre><code>curl https://image.twotop.icu/v1/images/generations \
+                  <pre><code data-api-example="generations">curl https://your-domain.example/v1/images/generations \
   -H "Authorization: Bearer sk-img-xxx" \
   -H "Content-Type: application/json" \
   -d '{
@@ -389,7 +411,7 @@
                 <article class="api-doc-block">
                   <span>图生图</span>
                   <h3>POST /v1/images/edits</h3>
-                  <pre><code>curl https://image.twotop.icu/v1/images/edits \
+                  <pre><code data-api-example="edits">curl https://your-domain.example/v1/images/edits \
   -H "Authorization: Bearer sk-img-xxx" \
   -F "prompt=把图片改成 iOS 风格产品摄影，背景干净" \
   -F "quality=2k" \
@@ -475,7 +497,7 @@
           <section class="feature-panel settings-panel" id="settingsPanel" aria-labelledby="settingsTitle" hidden aria-hidden="true">
             <header class="feature-head">
               <div>
-                <span class="feature-kicker">本地设置</span>
+                <span class="feature-kicker">账户设置</span>
                 <h2 id="settingsTitle">账号与通道</h2>
                 <p>这里保留本站登录、注册、余额和兑换码充值。</p>
               </div>
@@ -489,12 +511,12 @@
               <article>
                 <span>钱包余额</span>
                 <strong id="settingsBalance">0.00 奇点</strong>
-                <p>生成成功后才扣费。</p>
+                <p>生成任务、余额变动和退款状态会同步记录。</p>
               </article>
               <article>
                 <span>图像通道</span>
                 <strong id="settingsImageModel">读取中</strong>
-                <p id="settingsUpstream">本地服务连接状态。</p>
+                <p id="settingsUpstream">图像服务连接状态。</p>
               </article>
             </div>
             <div class="settings-actions">
@@ -505,18 +527,18 @@
 
           <section class="result-thread">
             <div class="thread-head">
-              <h2>当前会话</h2>
+              <h2>生成结果</h2>
               <span id="previewMeta">等待生成</span>
             </div>
             <div class="preview" id="preview">
               <div class="preview-empty">
                 <img src="/assets/showcase/hero-studio.svg" alt="生成预览占位" />
                 <h3>等待生成</h3>
-                <p>结果会显示在这里，成功后可直接下载，也可以上传到交流区邀请点赞和评论。</p>
+                <p>你的作品会出现在这里。</p>
               </div>
             </div>
             <div class="preview-footer">
-              <span>成功生成后才扣费</span>
+              <span>后台任务持续同步，离开页面也不会中断。</span>
             </div>
           </section>
 
@@ -555,6 +577,7 @@
                 <span class="admin-console-topbar-badge">管理员</span>
               </div>
             </header>
+            <div class="admin-console-status" id="adminConsoleStatus" role="status" aria-live="polite" hidden></div>
             <section class="admin-console-section active" id="adminOverviewSection" data-admin-section="overview">
               <div class="admin-overview-grid">
                 <article>
@@ -628,6 +651,7 @@
                 <div class="admin-billing-form">
                   <label>标准质量 / 张（奇点）<input id="adminPrice1k" type="number" min="0.01" step="0.01" inputmode="decimal" /></label>
                   <label>高质量 / 张（奇点）<input id="adminPrice2k" type="number" min="0.01" step="0.01" inputmode="decimal" /></label>
+                  <label>卡密购买地址<input id="adminPurchaseCodeUrl" type="url" inputmode="url" placeholder="https://catfk.com/shop/aoteman" autocomplete="off" /></label>
                   <button class="primary-button" id="adminSaveBillingBtn" type="button">保存计费</button>
                 </div>
               </div>
@@ -643,15 +667,20 @@
                 </div>
                 <div class="admin-inline-note">生图通道按优先级从高到低调度，同优先级按权重随机；当前通道失败后自动切换下一条。API Key 留空时保留当前 Key。</div>
                 <div class="admin-upstream-toolbar">
-                  <button class="ghost-button" id="adminAddImageUpstreamBtn" type="button">新增生图通道</button>
+                  <button class="secondary-button" id="adminAddImageUpstreamBtn" type="button">新增生图通道</button>
                 </div>
                 <div class="admin-upstream-list" id="adminImageUpstreamList"></div>
-                <div class="admin-billing-form admin-upstream-form">
+                <form class="admin-billing-form admin-upstream-form" id="adminUpstreamForm" novalidate>
+                  <input class="credential-username-sentinel" name="text-upstream-credential" autocomplete="username" value="youyu-text-upstream" tabindex="-1" aria-hidden="true" />
                   <label>文本 Base URL<input id="adminTextUpstreamBaseUrl" type="url" inputmode="url" placeholder="https://text-upstream.example.com" autocomplete="off" /></label>
-                  <label>文本 API Key<input id="adminTextUpstreamApiKey" type="password" placeholder="留空则不修改当前 Key" autocomplete="new-password" /></label>
+                  <label>文本 API Key<input id="adminTextUpstreamApiKey" name="text-upstream-api-key" type="password" placeholder="留空则不修改当前 Key" autocomplete="new-password" /></label>
+                  <label class="admin-upstream-toggle admin-upstream-clear-key">
+                    <input id="adminClearTextUpstreamApiKey" type="checkbox" />
+                    <span>清空当前文本 Key</span>
+                  </label>
                   <label>文本模型<input id="adminTextModel" type="text" placeholder="gpt-5.4-mini" autocomplete="off" /></label>
                   <button class="primary-button" id="adminSaveUpstreamBtn" type="button">保存上游</button>
-                </div>
+                </form>
               </div>
             </section>
 
@@ -721,7 +750,7 @@
                     <input id="adminRedeemCustomCode" maxlength="32" placeholder="自定义卡密，可留空" />
                   </div>
                   <div class="admin-toolbar-group">
-                    <button id="adminCreateRedeemBtn" type="button">生成卡密</button>
+                    <button class="primary-button" id="adminCreateRedeemBtn" type="button">生成卡密</button>
                   </div>
                 </div>
                 <div class="admin-toolbar">
@@ -766,17 +795,17 @@
                     <span id="adminUserMeta">新增、重置密码、禁用和软删除</span>
                   </div>
                 </div>
-                <div class="admin-toolbar admin-toolbar-split">
+                <form class="admin-toolbar admin-toolbar-split" id="adminCreateUserForm" novalidate>
                   <div class="admin-toolbar-group admin-toolbar-fields">
-                    <input id="adminNewAccount" autocomplete="off" placeholder="登录账号" />
-                    <input id="adminNewUsername" autocomplete="off" placeholder="显示用户名" />
-                    <input id="adminNewPassword" type="password" autocomplete="new-password" placeholder="初始密码" />
+                    <input id="adminNewAccount" name="new-account" autocomplete="off" placeholder="登录账号" />
+                    <input id="adminNewUsername" name="new-username" autocomplete="off" placeholder="显示用户名" />
+                    <input id="adminNewPassword" name="new-password" type="password" autocomplete="new-password" placeholder="初始密码" />
                     <input id="adminNewBalance" type="number" min="0" step="1" placeholder="初始余额（奇点）" />
                   </div>
                   <div class="admin-toolbar-group">
-                    <button id="adminCreateUserBtn" type="button">新增用户</button>
+                    <button class="primary-button" id="adminCreateUserBtn" type="button">新增用户</button>
                   </div>
-                </div>
+                </form>
                 <div class="admin-toolbar">
                   <div class="admin-toolbar-group admin-toolbar-fields">
                     <select id="topupUser"></select>
@@ -784,7 +813,7 @@
                     <input id="adminUserSearch" type="search" placeholder="搜索用户名或账号" />
                   </div>
                   <div class="admin-toolbar-group">
-                    <button id="topupBtn" type="button">加余额</button>
+                    <button class="secondary-button" id="topupBtn" type="button">加余额</button>
                   </div>
                 </div>
                 <div class="admin-table-meta" id="adminUserTableMeta">读取中</div>
@@ -833,32 +862,32 @@
     <div class="modal-backdrop" id="authModal" aria-hidden="true">
       <div class="auth-dialog login-campaign-dialog" role="dialog" aria-modal="true" aria-labelledby="authTitle">
         <button class="modal-close login-campaign-close" id="authCloseBtn" type="button" aria-label="关闭">×</button>
-        <section class="login-campaign-hero" aria-label="登录福利">
-          <span class="login-free-stamp">FREE</span>
+        <section class="login-campaign-hero" aria-label="账号登录">
+          <span class="login-free-stamp">YOUYU</span>
           <span class="login-paper-plane" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M21 3 9.5 14.5"/><path d="m21 3-7 18-4.5-6.5L3 10l18-7Z"/></svg>
           </span>
-          <div class="login-hero-pill">免费生图 · 灵感不限量</div>
-          <div class="login-hero-ribbon">登录即送 AI 创作礼包</div>
-          <div class="login-hero-dashed">新用户可立即开始创作</div>
+          <div class="login-hero-pill">登录有鱼生图</div>
+          <div class="login-hero-ribbon">同步余额、历史和交流区作品</div>
+          <div class="login-hero-dashed">注册后可使用兑换码充值</div>
         </section>
         <section class="login-campaign-body">
-          <div class="login-form-panel">
+          <form class="login-form-panel" id="authForm" novalidate>
             <p class="eyebrow">账号</p>
             <h2 id="authTitle">登录</h2>
             <p id="authIntro">登录后展示用户名和钱包余额。</p>
-            <label id="displayNameField" class="auth-register-only">用户名<input id="displayName" autocomplete="nickname" placeholder="登录后展示的名字" /></label>
-            <label>账号<input id="account" autocomplete="username" placeholder="输入账号" /></label>
-            <label>密码<input id="password" type="password" autocomplete="current-password" placeholder="至少 6 位" /></label>
+            <label id="displayNameField" class="auth-register-only">用户名（可选）<input id="displayName" name="nickname" autocomplete="nickname" placeholder="不填则默认使用账号" /></label>
+            <label>账号<input id="account" name="username" autocomplete="username" placeholder="输入账号" /></label>
+            <label>密码<input id="password" name="password" type="password" autocomplete="current-password" placeholder="至少 6 位" /></label>
             <p class="auth-status" id="authStatus" aria-live="polite"></p>
             <div class="auth-actions">
               <button class="primary-button" id="loginBtn" type="button">登录</button>
               <button class="secondary-button" id="registerBtn" type="button">注册账号</button>
             </div>
-          </div>
+          </form>
         </section>
         <div class="login-campaign-foot">
-          登录即代表同意《用户协议》和《隐私政策》，未注册账号将自动创建。
+          登录或注册即表示你已了解平台生成、充值和交流区规则。
         </div>
       </div>
     </div>
@@ -919,6 +948,13 @@
             <button type="button" data-community-publish-template="revision">求改图建议</button>
             <button type="button" data-community-publish-template="commercial">求商业反馈</button>
           </div>
+          <label class="community-source-consent" id="communitySourceConsent" hidden>
+            <input id="communityShowSourceImages" type="checkbox" />
+            <span>
+              <strong>公开图生图原图</strong>
+              <small>开启后，交流区会展示本次图生图使用的参考原图；关闭则只有你和管理员可见。</small>
+            </span>
+          </label>
           <label>标签<input id="communityPostTags" maxlength="80" placeholder="海报, 产品, 国风" /></label>
           <p class="community-publish-tip-note">下载始终免费；自愿支持只是感谢，不购买权益，也不影响热度排名。</p>
         </div>
@@ -1026,6 +1062,6 @@
       </div>
     </div>
 
-    <script src="/app.js?v=2026063003" type="module"></script>
+    <script src="/app.js?v=2026071402" type="module"></script>
   </body>
 </html>

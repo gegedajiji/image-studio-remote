@@ -8,7 +8,7 @@ export async function api(path, options = {}) {
       body: options.body ? JSON.stringify(options.body) : undefined
     });
   } catch (error) {
-    const message = path === '/api/generate'
+    const message = String(path || '').startsWith('/api/generate')
       ? '生图请求连接中断。请先查看历史记录和生图日志，系统会在失败时自动退款。'
       : '网络连接中断，请稍后重试。';
     const friendlyError = new Error(message);

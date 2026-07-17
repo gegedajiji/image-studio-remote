@@ -188,20 +188,22 @@ function renderAgentConversations() {
   list.innerHTML = state.agentConversations.map((item) => {
     const active = item.id === state.activeAgentConversationId;
     return `
-      <button class="agent-conversation ${active ? 'active' : ''}" type="button" data-agent-conversation="${escapeHtml(item.id)}">
-        <span class="agent-conversation-top">
-          <strong>${escapeHtml(item.title || '新对话')}</strong>
-          <small>${escapeHtml(formatAgentTime(item.updatedAt))}</small>
-        </span>
-        <span class="agent-conversation-preview">${escapeHtml(item.preview || '暂无消息')}</span>
+      <article class="agent-conversation ${active ? 'active' : ''}" data-agent-conversation="${escapeHtml(item.id)}">
+        <button class="agent-conversation-select" type="button" data-agent-conversation-select="${escapeHtml(item.id)}">
+          <span class="agent-conversation-top">
+            <strong>${escapeHtml(item.title || '新对话')}</strong>
+            <small>${escapeHtml(formatAgentTime(item.updatedAt))}</small>
+          </span>
+          <span class="agent-conversation-preview">${escapeHtml(item.preview || '暂无消息')}</span>
+        </button>
         <span class="agent-conversation-meta">
           <em>${escapeHtml(agentModelLabel(item.model || defaultAgentModel))} · ${escapeHtml(reasoningLabels[item.reasoningEffort] || '中')}</em>
           <span>
-            <i role="button" tabindex="0" data-agent-action="rename" data-agent-id="${escapeHtml(item.id)}">重命名</i>
-            <i role="button" tabindex="0" data-agent-action="delete" data-agent-id="${escapeHtml(item.id)}">删除</i>
+            <button type="button" data-agent-action="rename" data-agent-id="${escapeHtml(item.id)}">重命名</button>
+            <button type="button" data-agent-action="delete" data-agent-id="${escapeHtml(item.id)}">删除</button>
           </span>
         </span>
-      </button>
+      </article>
     `;
   }).join('');
 }
@@ -347,8 +349,9 @@ function handleAgentConversationListClick(event) {
     deleteAgentConversation(id);
     return;
   }
-  const button = event.target.closest('[data-agent-conversation]');
-  if (button) selectAgentConversation(button.dataset.agentConversation);
+  const button = event.target.closest('[data-agent-conversation-select], [data-agent-conversation]');
+  const conversationId = button?.dataset.agentConversationSelect || button?.dataset.agentConversation || '';
+  if (conversationId) selectAgentConversation(conversationId);
 }
 
 function handleAgentConversationListKeydown(event) {

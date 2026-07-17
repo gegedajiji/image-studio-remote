@@ -1,7 +1,10 @@
 import { state } from './state.js';
 import { $ } from './dom.js';
 import { api } from './api-client.js';
+import { sourceToDataUrl } from './image-utils.js';
+import { addReferenceImage, renderReferencePreview } from './source-images.js';
 import { createDebouncer } from './scheduler.js';
+import { MAX_STUDIO_SOURCE_IMAGES } from './constants.js';
 import {
   historyHasActiveFilters,
   historyQueryString,
@@ -23,25 +26,72 @@ export function initHistoryController(nextCallbacks = {}) {
   callbacks = { ...callbacks, ...nextCallbacks };
 }
 
-export async function loadHistory() {
+function mergeHistoryItems(currentItems = [], nextItems = []) {
+  const seen = new Set();
+  return [...currentItems, ...nextItems].filter((item) => {
+    const id = String(item?.id || '');
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+export async function loadHistory({ append = false } = {}) {
+  if (append && (state.historyLoadingMore || !state.historyHasMore)) return;
   const loadToken = ++state.historyLoadToken;
-  resetHistoryRenderLimit();
+  if (!append) {
+    resetHistoryRenderLimit();
+    state.historyLoadingMore = false;
+  }
   if (!state.user) {
     state.historyItems = [];
     state.historyTotal = 0;
     state.historyDeletableCount = 0;
+    state.historyNextOffset = 0;
+    state.historyHasMore = false;
+    state.historyLoadingMore = false;
     renderHistoryList();
     return;
   }
   const historyNode = $('history');
-  if (historyNode) historyNode.innerHTML = '<p class="history-loading">正在读取会话记录</p>';
-  const query = historyQueryString();
-  const data = await api(`/api/history${query ? `?${query}` : ''}`);
-  if (loadToken !== state.historyLoadToken) return;
-  state.historyItems = data.generations || [];
-  state.historyTotal = Number(data.total ?? data.generations?.length ?? 0);
-  state.historyDeletableCount = Number(data.deletableCount ?? 0);
-  renderHistoryList();
+  if (!append && historyNode) historyNode.innerHTML = '<p class="history-loading">正在读取会话记录</p>';
+  if (append) {
+    state.historyLoadingMore = true;
+    const moreButton = historyNode?.querySelector('[data-history-action="showMore"]');
+    if (moreButton) {
+      moreButton.disabled = true;
+      moreButton.firstChild.textContent = '正在读取更多历史 ';
+    }
+  }
+  const offset = append ? Number(state.historyNextOffset || state.historyItems.length || 0) : 0;
+  const limit = Math.max(1, Math.min(100, Number(state.historyPageSize || 48)));
+  try {
+    const query = historyQueryString({ limit, offset });
+    const data = await api(`/api/history${query ? `?${query}` : ''}`);
+    if (loadToken !== state.historyLoadToken) return;
+    const nextItems = Array.isArray(data.generations) ? data.generations : [];
+    state.historyItems = append ? mergeHistoryItems(state.historyItems, nextItems) : nextItems;
+    state.historyTotal = Number(data.total ?? state.historyItems.length ?? 0);
+    state.historyDeletableCount = Number(data.deletableCount ?? 0);
+    state.historyNextOffset = Number(data.nextOffset ?? state.historyItems.length);
+    state.historyHasMore = Boolean(data.hasMore);
+    if (append) state.historyLoadingMore = false;
+    renderHistoryList();
+  } catch (error) {
+    if (loadToken !== state.historyLoadToken) return;
+    state.historyLoadingMore = false;
+    renderHistoryList();
+    throw error;
+  } finally {
+    if (append && loadToken === state.historyLoadToken && state.historyLoadingMore) {
+      state.historyLoadingMore = false;
+      renderHistoryList();
+    }
+  }
+}
+
+export async function loadMoreHistory() {
+  return loadHistory({ append: true });
 }
 
 export async function clearHistoryFilters() {
@@ -73,10 +123,30 @@ export async function publishHistoryGeneration(id) {
 export async function reuseHistoryGeneration(id) {
   const item = state.historyItems.find((entry) => entry.id === id);
   if (!item) return;
+  const sourceImages = Array.isArray(item.sourceImages)
+    ? item.sourceImages.filter((image) => image?.imageUrl).slice(0, MAX_STUDIO_SOURCE_IMAGES)
+    : [];
   callbacks.applyGenerationSettings(item, {
     submit: false,
-    statusText: item.mode === 'edit' ? '已回填历史提示词和参数；源图需重新上传后再生成。' : '已回填历史提示词和参数。'
+    statusText: item.mode === 'edit' && sourceImages.length ? '已回填历史提示词和参数，正在恢复源图…' : '已回填历史提示词和参数。'
   });
+  if (item.mode !== 'edit' || !sourceImages.length) return;
+  let restoredCount = 0;
+  try {
+    for (const [index, image] of sourceImages.entries()) {
+      const dataUrl = await sourceToDataUrl(image.imageUrl);
+      if (addReferenceImage(dataUrl, { replace: index === 0, label: `历史源图 ${index + 1}` })) {
+        restoredCount += 1;
+      }
+    }
+    renderReferencePreview();
+    callbacks.setStatus(restoredCount
+      ? `已恢复 ${restoredCount} 张历史源图，可以直接按图生图重新生成。`
+      : '历史源图恢复失败，请重新上传源图后再生成。', restoredCount === 0);
+  } catch (error) {
+    renderReferencePreview();
+    callbacks.setStatus(`历史源图读取失败，请重新上传源图后再生成：${error.message}`, true);
+  }
 }
 
 export async function deleteHistoryGeneration(id, button) {

@@ -67,12 +67,13 @@ export function syncSourceImageStateClass() {
   document.body.classList.toggle('has-source-image', currentImageDataUrls().length > 0);
 }
 
-function applyModeFromSources() {
+export function applyModeFromSources() {
   callbacks.setMode(currentImageDataUrls().length ? 'edit' : 'generate');
 }
 
 export function setActiveSource(id) {
   if (!state.sourceImages.some((item) => item.id === id)) return;
+  if (state.activeSourceId === id) return;
   state.activeSourceId = id;
   clearSelectionMask();
   syncActiveReference();
@@ -176,34 +177,37 @@ export function renderReferencePreview() {
 export async function readImageFiles(files) {
   const selectedFiles = Array.from(files || []).slice(0, 1);
   const incoming = selectedFiles.slice(0, MAX_STUDIO_SOURCE_IMAGES);
-  if (!incoming.length) return;
-  clearReferenceImage();
-  for (const file of incoming) {
+  if (!incoming.length) return false;
+  try {
+    const file = incoming[0];
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
       callbacks.setStatus('只支持常见图片格式。', true);
-      if ($('imageInput')) $('imageInput').value = '';
-      return;
+      return false;
     }
     if (file.size > 12 * 1024 * 1024) {
       callbacks.setStatus('图片不能超过 12 兆。', true);
-      if ($('imageInput')) $('imageInput').value = '';
-      return;
+      return false;
     }
     const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result || ''));
       reader.onerror = () => reject(new Error('图片读取失败'));
+      reader.onabort = () => reject(new Error('图片读取已取消'));
       reader.readAsDataURL(file);
     });
-    if (!addReferenceImage(dataUrl, { replace: true, label: file.name || '当前源图' })) {
-      if ($('imageInput')) $('imageInput').value = '';
+    if (!dataUrl || !addReferenceImage(dataUrl, { replace: true, label: file.name || '当前源图' })) {
       callbacks.setStatus('源图加载失败，请重试。', true);
-      return;
+      return false;
     }
+    renderReferencePreview();
+    callbacks.setStatus('源图已更新。');
+    return true;
+  } catch (error) {
+    callbacks.setStatus(error.message || '图片读取失败，请重试。', true);
+    return false;
+  } finally {
+    if ($('imageInput')) $('imageInput').value = '';
   }
-  callbacks.setMode('edit');
-  renderReferencePreview();
-  callbacks.setStatus('源图已更新。');
 }
 
 export async function readImageFile(file) {

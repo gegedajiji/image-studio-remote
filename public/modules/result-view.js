@@ -47,25 +47,31 @@ function resultHtmlCacheKey(item, sources) {
   ].join('::');
 }
 
+export function resultRenderKey(item) {
+  return resultHtmlCacheKey(item, imageSources(item));
+}
+
 export function renderResultActions(item, index, src) {
   const prompt = item?.prompt || '';
   const outputFormat = outputFormatForImage(item?.images?.[index] || item, item?.outputFormat || state.outputFormat);
   const extension = extensionForFormat(outputFormat);
-  const publishButton = item?.id && item?.status !== 'failed'
-    ? item.communityPostId
-      ? ''
-      : `<button class="result-action-primary" type="button" data-result-action="publish" data-result-index="${index}">${item.reuseSourcePost?.id ? '发布我的版本' : '上传这张到交流区'}</button>`
+  const publishButton = item?.id && item?.status !== 'failed' && !item.communityPostId && !item.reuseSourcePost?.id
+    ? `<button class="result-action-publish" type="button" data-result-action="publish" data-result-index="${index}">上传交流区</button>`
     : '';
   return `
     <div class="result-actions">
-      <a href="${escapeHtml(src)}" download="onetop-image-${index + 1}.${extension}">下载原图</a>
-      <button type="button" data-result-action="viewOriginal" data-result-index="${index}">原尺寸查看</button>
-      <button type="button" data-result-action="reference" data-result-index="${index}">引用</button>
-      <button type="button" data-result-action="edit" data-result-index="${index}">编辑</button>
-      <button type="button" data-result-action="canvas" data-result-index="${index}">放到画布</button>
+      <a class="result-action-download" href="${escapeHtml(src)}" download="onetop-image-${index + 1}.${extension}">下载原图</a>
+      <button class="result-action-edit" type="button" data-result-action="edit" data-result-index="${index}">继续编辑</button>
       ${publishButton}
-      <button type="button" data-result-action="copy" data-result-index="${index}" ${prompt ? '' : 'disabled'}>复制提示词</button>
-      <button type="button" data-result-action="rerun" data-result-index="${index}" ${prompt ? '' : 'disabled'}>重新生成</button>
+      <details class="result-more-menu">
+        <summary>更多</summary>
+        <div class="result-more-popover">
+          <button type="button" data-result-action="viewOriginal" data-result-index="${index}">原尺寸查看</button>
+          <button type="button" data-result-action="canvas" data-result-index="${index}">放到画布</button>
+          <button type="button" data-result-action="copy" data-result-index="${index}" ${prompt ? '' : 'disabled'}>复制提示词</button>
+          <button type="button" data-result-action="rerun" data-result-index="${index}" ${prompt ? '' : 'disabled'}>重新生成</button>
+        </div>
+      </details>
     </div>
   `;
 }
@@ -78,9 +84,10 @@ export function resultAspectClass(item) {
 }
 
 export function renderResultImage(src, index, item = null) {
+  const isPriorityImage = index === 0;
   return `
     <div class="result-image-frame ${resultAspectClass(item)} is-loading">
-      <img src="${escapeHtml(src)}" alt="生成图片 ${index + 1}" loading="eager" decoding="async" data-result-image="${index}" data-result-src="${escapeHtml(src)}" />
+      <img src="${escapeHtml(src)}" alt="生成图片 ${index + 1}" loading="${isPriorityImage ? 'eager' : 'lazy'}" fetchpriority="${isPriorityImage ? 'high' : 'low'}" decoding="async" data-result-image="${index}" data-result-src="${escapeHtml(src)}" />
       <div class="result-image-error" role="status">
         <strong>图片暂时没加载出来</strong>
         <span>可以重试加载，或直接打开原尺寸查看。</span>
@@ -123,19 +130,7 @@ export function renderPublishPrompt(item) {
       </section>
     `;
   }
-  const sources = imageSources(item);
-  const publishPromptButton = sources.length > 1
-    ? '<button class="secondary-button" type="button" data-result-action="publish" data-result-index="0" data-result-default-all="true">选择要上传的图片</button>'
-    : '<button class="primary-button" type="button" data-result-action="publish" data-result-index="0">上传到交流区</button>';
-  return `
-    <section class="result-publish-prompt">
-        <div>
-          <strong>上传到交流区，邀请点赞评论</strong>
-        <span>${sources.length > 1 ? '每张图也可以单独上传；这里可打开选择器，勾选要合并成作品集的图片。' : '发布后可复制邀请文案，请朋友点赞、评论；下载始终免费，参考创作和自愿支持不参与排名。'}</span>
-      </div>
-      ${publishPromptButton}
-    </section>
-  `;
+  return '';
 }
 
 export function renderGeneratedImagesHtml(item) {
@@ -145,15 +140,15 @@ export function renderGeneratedImagesHtml(item) {
   if (cached) return cached;
   const gridClass = sources.length > 1 ? 'multi-result' : 'single-result';
   return rememberResultHtml(cacheKey, `
-    ${renderPublishPrompt(item)}
     <div class="${gridClass}">
       ${sources.map((src, index) => `
         <article class="result-card">
-          ${renderResultImage(src, index, item)}
           <div class="result-meta">${escapeHtml(resultMetaText(item, index))}</div>
           ${renderResultActions(item, index, src)}
+          ${renderResultImage(src, index, item)}
         </article>
       `).join('')}
     </div>
+    ${renderPublishPrompt(item)}
   `);
 }

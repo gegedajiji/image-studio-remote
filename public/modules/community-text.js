@@ -21,8 +21,13 @@ export function cleanPromptText(prompt) {
 }
 
 export function cleanCommunityDisplayText(text) {
+  const placeholderPrefixes = ['我想把它用于：', '希望大家帮我看：', '最想听哪一处建议：'];
   return String(text || '')
     .replace(/\s*清晰度要求[:：][^\n\r。；;]*/gi, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !placeholderPrefixes.some((prefix) => line === prefix))
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }

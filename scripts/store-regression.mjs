@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 const rootDir = process.cwd();
 const sourceStorePath = path.join(rootDir, 'src', 'store.js');
 const projectNodeModules = path.join(rootDir, 'node_modules');
+const oneByOnePngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 function fail(message) {
   throw new Error(message);
@@ -101,6 +102,163 @@ async function main() {
     );
     assert(store.snapshot().redeemCodes.length === afterBatch.redeemCodes.length, 'failed redeem create should not change redeem list');
 
+    const billingWithPurchaseUrl = await store.updateBillingPrices({
+      prices: { '1k': 123, '2k': 456 },
+      purchaseCodeUrl: 'https://example.com/shop/redeem',
+      operatorId: admin.id
+    });
+    assert(billingWithPurchaseUrl.prices['1k'] === 123 && billingWithPurchaseUrl.prices['2k'] === 456, 'billing prices should update');
+    assert(billingWithPurchaseUrl.purchaseCodeUrl === 'https://example.com/shop/redeem', 'billing purchase url should update');
+    const billingWithoutPurchaseUrl = await store.updateBillingPrices({
+      prices: { '1k': 123, '2k': 456 },
+      purchaseCodeUrl: '',
+      operatorId: admin.id
+    });
+    assert(billingWithoutPurchaseUrl.purchaseCodeUrl === '', 'billing purchase url should allow explicit clearing');
+    await assertRejects(
+      () => store.updateBillingPrices({ prices: { '1k': 123, '2k': 456 }, purchaseCodeUrl: 'javascript:alert(1)', operatorId: admin.id }),
+      'invalid purchase code url'
+    );
+
+    const aiWithKeys = await store.updateAiSettings({
+      operatorId: admin.id,
+      settings: {
+        imageUpstreams: [
+          {
+            id: 'primary-key-keep',
+            name: 'Primary keep key',
+            enabled: true,
+            upstreamBaseUrl: 'https://image-a.example.com',
+            upstreamApiKey: 'image-key-a',
+            imageModel: 'gpt-image-2',
+            priority: 100,
+            weight: 1
+          },
+          {
+            id: 'secondary-key-clear',
+            name: 'Secondary clear key',
+            enabled: false,
+            upstreamBaseUrl: 'https://image-b.example.com',
+            upstreamApiKey: 'image-key-b',
+            imageModel: 'gpt-image-2',
+            priority: 90,
+            weight: 1
+          }
+        ],
+        textUpstreamBaseUrl: 'https://text.example.com',
+        textUpstreamApiKey: 'text-key-a',
+        textModel: 'gpt-4o-mini'
+      }
+    });
+    assert(aiWithKeys.imageUpstreams.length === 2, 'ai settings should keep multiple image upstreams');
+    assert(aiWithKeys.imageUpstreams[0].upstreamApiKeyConfigured === true, 'primary image key should be configured');
+    assert(aiWithKeys.textUpstreamApiKeyConfigured === true, 'text key should be configured');
+
+    const aiKeepBlankKeys = await store.updateAiSettings({
+      operatorId: admin.id,
+      settings: {
+        imageUpstreams: [
+          {
+            id: 'primary-key-keep',
+            name: 'Primary keep key',
+            enabled: true,
+            upstreamBaseUrl: 'https://image-a.example.com',
+            upstreamApiKey: '',
+            imageModel: 'gpt-image-2',
+            priority: 100,
+            weight: 1
+          },
+          {
+            id: 'secondary-key-clear',
+            name: 'Secondary clear key',
+            enabled: false,
+            upstreamBaseUrl: 'https://image-b.example.com',
+            upstreamApiKey: '',
+            imageModel: 'gpt-image-2',
+            priority: 90,
+            weight: 1
+          }
+        ],
+        textUpstreamBaseUrl: 'https://text.example.com',
+        textUpstreamApiKey: '',
+        textModel: 'gpt-4o-mini'
+      }
+    });
+    assert(aiKeepBlankKeys.imageUpstreams.every((item) => item.upstreamApiKeyConfigured), 'blank image key fields should retain existing keys');
+    assert(aiKeepBlankKeys.textUpstreamApiKeyConfigured === true, 'blank text key field should retain existing key');
+
+    await assertRejects(
+      () => store.updateAiSettings({
+        operatorId: admin.id,
+        settings: {
+          imageUpstreams: [
+            {
+              id: 'primary-key-keep',
+              name: 'Primary keep key',
+              enabled: true,
+              upstreamBaseUrl: 'https://image-a.example.com',
+              upstreamApiKey: '',
+              clearUpstreamApiKey: true,
+              imageModel: 'gpt-image-2',
+              priority: 100,
+              weight: 1
+            },
+            {
+              id: 'secondary-key-clear',
+              name: 'Secondary clear key',
+              enabled: false,
+              upstreamBaseUrl: 'https://image-b.example.com',
+              upstreamApiKey: '',
+              imageModel: 'gpt-image-2',
+              priority: 90,
+              weight: 1
+            }
+          ],
+          textUpstreamBaseUrl: 'https://text.example.com',
+          textUpstreamApiKey: '',
+          textModel: 'gpt-4o-mini'
+        }
+      }),
+      'clearing enabled image upstream key'
+    );
+
+    const aiClearedKeys = await store.updateAiSettings({
+      operatorId: admin.id,
+      settings: {
+        imageUpstreams: [
+          {
+            id: 'primary-key-keep',
+            name: 'Primary keep key',
+            enabled: true,
+            upstreamBaseUrl: 'https://image-a.example.com',
+            upstreamApiKey: '',
+            imageModel: 'gpt-image-2',
+            priority: 100,
+            weight: 1
+          },
+          {
+            id: 'secondary-key-clear',
+            name: 'Secondary clear key',
+            enabled: false,
+            upstreamBaseUrl: 'https://image-b.example.com',
+            upstreamApiKey: '',
+            clearUpstreamApiKey: true,
+            imageModel: 'gpt-image-2',
+            priority: 90,
+            weight: 1
+          }
+        ],
+        textUpstreamBaseUrl: 'https://text.example.com',
+        textUpstreamApiKey: '',
+        clearTextUpstreamApiKey: true,
+        textModel: 'gpt-4o-mini'
+      }
+    });
+    const clearedSecondary = aiClearedKeys.imageUpstreams.find((item) => item.id === 'secondary-key-clear');
+    assert(aiClearedKeys.imageUpstreams.find((item) => item.id === 'primary-key-keep')?.upstreamApiKeyConfigured === true, 'primary key should remain configured');
+    assert(clearedSecondary?.upstreamApiKeyConfigured === false, 'explicit clear should remove disabled image upstream key');
+    assert(aiClearedKeys.textUpstreamApiKeyConfigured === false, 'explicit clear should remove text key');
+
     const firstCharge = await store.createChargedGeneration({
       userId: user.id,
       amountCents: 300,
@@ -165,6 +323,100 @@ async function main() {
     assert(partialSummary.remainingAmountCents === 0, 'partial plus remaining refund should leave zero remaining charge');
     assert(store.findUserById(user.id).balanceCents === 1000, 'partial refund clamp should not over-credit balance');
 
+    const partialRecoveryCharge = await store.createChargedGeneration({
+      userId: user.id,
+      amountCents: 400,
+      reason: 'regression partial recovery charge',
+      generation: {
+        mode: 'generate',
+        prompt: 'regression partial recovery',
+        quality: '1k',
+        count: 4,
+        priceCents: 400,
+        startedAt: Date.now()
+      }
+    });
+    await store.updateGeneration(partialRecoveryCharge.generation.id, {
+      status: 'succeeded',
+      metadata: {
+        requestedCount: 4,
+        returnedCount: 2,
+        failedCount: 2,
+        partialRefundRequestedCents: 200,
+        partialRefundCents: 0,
+        partialRefundError: 'simulated refund outage',
+        refundPending: true
+      }
+    });
+    const recovered = await store.retryPendingGenerationRefunds({
+      limit: 10,
+      reason: 'regression partial recovery'
+    });
+    assert(
+      recovered.some((item) => item.id === partialRecoveryCharge.generation.id && item.status === 'refunded' && item.amountCents === 200),
+      'partial success refund recovery should only refund the failed-image difference'
+    );
+    const recoveredPartialSummary = store.generationBillingSummary(partialRecoveryCharge.generation.id, user.id);
+    assert(recoveredPartialSummary.refundedAmountCents === 200, 'partial success recovery should not refund successful images');
+    assert(recoveredPartialSummary.remainingAmountCents === 200, 'partial success recovery should leave successful-image charge');
+    assert(store.findUserById(user.id).balanceCents === 800, 'partial success recovery should only restore failed-image charge');
+
+    await store.refundBalance({
+      userId: user.id,
+      amountCents: 400,
+      generationId: partialRecoveryCharge.generation.id,
+      reason: 'regression cleanup remaining charge'
+    });
+    assert(store.findUserById(user.id).balanceCents === 1000, 'cleanup refund should restore balance for following checks');
+
+    const sourceVisibilityCharge = await store.createChargedGeneration({
+      userId: user.id,
+      amountCents: 100,
+      reason: 'regression source visibility charge',
+      generation: {
+        mode: 'edit',
+        prompt: 'regression source visibility',
+        quality: '1k',
+        count: 1,
+        priceCents: 100,
+        outputFormat: 'png',
+        startedAt: Date.now()
+      }
+    });
+    await store.updateGeneration(sourceVisibilityCharge.generation.id, {
+      status: 'succeeded',
+      imageBase64: oneByOnePngBase64,
+      sourceImages: [{
+        imageBase64: oneByOnePngBase64,
+        mimeType: 'image/png',
+        outputFormat: 'png'
+      }]
+    });
+    const visibleSourcePost = await store.createCommunityPost({
+      userId: user.id,
+      generationId: sourceVisibilityCharge.generation.id,
+      title: 'source visibility',
+      description: 'source visibility regression',
+      showSourceImages: true
+    });
+    assert(visibleSourcePost.showSourceImages === true, 'edit community post should persist source-image visibility opt-in');
+    const hiddenSourcePost = await store.updateCommunityPost({
+      postId: visibleSourcePost.id,
+      userId: user.id,
+      title: visibleSourcePost.title,
+      description: visibleSourcePost.description,
+      tags: visibleSourcePost.tags,
+      showSourceImages: false
+    });
+    assert(hiddenSourcePost.showSourceImages === false, 'community post edit should allow disabling source-image visibility');
+    await store.refundBalance({
+      userId: user.id,
+      amountCents: 100,
+      generationId: sourceVisibilityCharge.generation.id,
+      reason: 'regression cleanup source visibility charge'
+    });
+    assert(store.findUserById(user.id).balanceCents === 1000, 'source visibility cleanup refund should restore balance');
+
     const staleStartedAt = Date.now() - 60_000;
     const staleCharge = await store.createChargedGeneration({
       userId: user.id,
@@ -191,14 +443,60 @@ async function main() {
     assert(store.generationBillingSummary(staleCharge.generation.id, user.id).remainingAmountCents === 0, 'stale pending refund should clear charge');
     assert(store.findUserById(user.id).balanceCents === 1000, 'stale pending refund should restore balance');
 
+    const disabledUser = await store.adminCreateUser({
+      account: 'pending_cancel_user',
+      username: 'pending_cancel_user',
+      password: 'secret123',
+      balanceCents: 500,
+      operatorId: admin.id
+    });
+    const disabledUserCharge = await store.createChargedGeneration({
+      userId: disabledUser.id,
+      amountCents: 300,
+      reason: 'regression pending cancel charge',
+      generation: {
+        mode: 'generate',
+        prompt: 'regression pending cancel',
+        quality: '1k',
+        count: 3,
+        priceCents: 300,
+        startedAt: Date.now()
+      }
+    });
+    assert(store.findUserById(disabledUser.id).balanceCents === 200, 'pending cancel setup should precharge balance');
+    const cancelled = await store.failPendingGenerationsForUser({
+      userId: disabledUser.id,
+      reason: 'regression admin disabled user',
+      operatorId: admin.id
+    });
+    assert(cancelled.some((item) => item.id === disabledUserCharge.generation.id && item.amountCents === 300), 'admin cancellation should refund pending generation');
+    const cancelledGeneration = store.findGenerationById(disabledUserCharge.generation.id);
+    assert(cancelledGeneration.status === 'failed', 'admin cancellation should mark generation failed');
+    assert(cancelledGeneration.metadata?.adminCancelled === true, 'admin cancellation metadata should be recorded');
+    assert(store.generationBillingSummary(disabledUserCharge.generation.id, disabledUser.id).remainingAmountCents === 0, 'admin cancellation refund should clear charge');
+    assert(store.findUserById(disabledUser.id).balanceCents === 500, 'admin cancellation should restore user balance');
+    const refundCountBeforeSecondCancel = countTransactions(store.snapshot(), 'refund', disabledUserCharge.generation.id);
+    const cancelledAgain = await store.failPendingGenerationsForUser({
+      userId: disabledUser.id,
+      reason: 'regression duplicate admin cancellation',
+      operatorId: admin.id
+    });
+    assert(cancelledAgain.length === 0, 'duplicate admin cancellation should not touch terminal generations');
+    assert(countTransactions(store.snapshot(), 'refund', disabledUserCharge.generation.id) === refundCountBeforeSecondCancel, 'duplicate admin cancellation should not double refund');
+
     console.log(JSON.stringify({
       ok: true,
       checks: {
         redeemAppendPreservesOldCodes: true,
         redeemAmountValidation: true,
+        billingPurchaseUrl: true,
+        aiSettingsClearKeys: true,
         fullRefundNoDoubleRefund: true,
         partialRefundClamp: true,
-        stalePendingRefund: true
+        partialRefundRecoveryLimit: true,
+        communitySourceVisibility: true,
+        stalePendingRefund: true,
+        adminCancelPendingRefund: true
       },
       tempRoot
     }, null, 2));
