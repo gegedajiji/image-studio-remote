@@ -1,28 +1,54 @@
-# Dependencies
-node_modules/
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Runtime configuration and secrets
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# Environment variables
 .env
 .env.*
 !.env.example
-
+# Database
+*.db
+*.sqlite
+*.sqlite3
+db/migrations/*.sql
 # Runtime data and generated artifacts
 data/
 output/
 .playwright-cli/
-
-# Logs and local system files
-*.log
-npm-debug.log*
-.DS_Store
-
-# Backups and packaged exports
+# TypeScript cache
+*.tsbuildinfo
+# Local package-manager placeholder (this repository is not a workspace)
+pnpm-workspace.yaml
+# Build outputs
+dist/
+build/
+# Test coverage
+coverage/
+.nyc_output/
+# Deployment and editor backups
+deploy/backups/
+deploy/standalone/*.before-*
+deploy/standalone/*.new
 *.bak
 *.bak-*
 *.tmp
-youyu-image-studio-source-*.tar.gz
-
-# Legacy root-level frontend snapshots. The app serves public/.
-/app.js
-/index.html
-/styles.css

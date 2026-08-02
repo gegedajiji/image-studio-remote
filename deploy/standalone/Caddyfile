@@ -1,0 +1,14 @@
+image.twotop.icu {
+  encode gzip zstd
+  reverse_proxy app:3000
+}
+
+http://154.219.121.64 {
+  encode gzip zstd
+  reverse_proxy app:3000
+}
+
+json.caosiwo.xyz {
+  encode gzip zstd
+  reverse_proxy json-card-redeemer-app:3030
+}

@@ -1,32 +1,15 @@
-FROM node:22-bookworm-slim AS deps
-
+# 构建阶段
+FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --no-frozen-lockfile
+COPY . .
+RUN pnpm run build
 
-FROM node:22-bookworm-slim AS runtime
-
-ENV NODE_ENV=production \
-    PORT=8790
-
+# 运行阶段（boot.js 已打包全部依赖，配置由运行环境注入）
+FROM node:20-alpine
 WORKDIR /app
-
-COPY --from=deps --chown=node:node /app/node_modules ./node_modules
-COPY --chown=node:node package.json package-lock.json ./
-COPY --chown=node:node public ./public
-COPY --chown=node:node src ./src
-COPY --chown=node:node scripts ./scripts
-COPY --chown=node:node docs ./docs
-COPY --chown=node:node README.md ./
-
-RUN mkdir -p /app/data && chown node:node /app/data
-
-USER node
-
-EXPOSE 8790
-VOLUME ["/app/data"]
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 8790) + '/api/health').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"
-
-CMD ["node", "src/server.js"]
+COPY --from=build /app/dist ./dist
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["node", "dist/boot.js"]
