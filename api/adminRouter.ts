@@ -222,39 +222,6 @@ export const adminRouter = createRouter({
     }),
   }),
 
-  // ===== 生图历史（全部用户） =====
-  generations: adminQuery
-    .input(
-      z.object({
-        status: z.enum(["all", "pending", "success", "failed"]).default("all"),
-        limit: z.number().min(1).max(200).default(50),
-      }),
-    )
-    .query(async ({ input }) => {
-      const db = getDb();
-      const cond = input.status === "all" ? undefined : eq(generations.status, input.status);
-      return db
-        .select({
-          id: generations.id,
-          prompt: generations.prompt,
-          model: generations.model,
-          width: generations.width,
-          height: generations.height,
-          imageUrl: generations.imageUrl,
-          status: generations.status,
-          cost: generations.cost,
-          errorMsg: generations.errorMsg,
-          createdAt: generations.createdAt,
-          userName: users.name,
-          userId: users.id,
-        })
-        .from(generations)
-        .innerJoin(users, eq(generations.userId, users.id))
-        .where(cond)
-        .orderBy(desc(generations.id))
-        .limit(input.limit);
-    }),
-
   // ===== 卡密管理 =====
   cards: createRouter({
     list: adminQuery

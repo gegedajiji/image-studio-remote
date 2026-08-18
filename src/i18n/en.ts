@@ -60,7 +60,7 @@ export const en: Dict = {
     f4t: "Creator Community",
     f4d: "Publish to the gallery in one click, browse others' ideas, like and reuse great prompts.",
     f5t: "Full Admin Console",
-    f5d: "Upstream config, user quotas & status, pricing, generation history and batch card keys.",
+    f5d: "Upstream config, user quotas and status, pricing, and batch card keys.",
     f6t: "Auto Refund on Failure",
     f6d: "Failed generations return credits automatically, with a full ledger of every change.",
     idea1:
@@ -248,7 +248,6 @@ export const en: Dict = {
     upstreams: "Upstreams",
     users: "Users",
     pricing: "Pricing",
-    generations: "Generations",
     cards: "Card Keys",
     noAccess: "Access Denied",
     noAccessSub: "The admin console is only available to administrators",

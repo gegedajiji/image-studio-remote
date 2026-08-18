@@ -8,7 +8,6 @@ import {
   Server,
   Users,
   Tags,
-  History,
   Ticket,
   Loader2,
   ShieldAlert,
@@ -18,7 +17,6 @@ import AdminDashboard from "./AdminDashboard";
 import AdminUpstreams from "./AdminUpstreams";
 import AdminUsers from "./AdminUsers";
 import AdminPricing from "./AdminPricing";
-import AdminGenerations from "./AdminGenerations";
 import AdminCards from "./AdminCards";
 
 const SECTION_DEFS = [
@@ -26,7 +24,6 @@ const SECTION_DEFS = [
   { key: "upstreams", icon: Server },
   { key: "users", icon: Users },
   { key: "pricing", icon: Tags },
-  { key: "generations", icon: History },
   { key: "cards", icon: Ticket },
 ] as const;
 
@@ -93,7 +90,6 @@ export default function Admin() {
             {section === "upstreams" && <AdminUpstreams />}
             {section === "users" && <AdminUsers />}
             {section === "pricing" && <AdminPricing />}
-            {section === "generations" && <AdminGenerations />}
             {section === "cards" && <AdminCards />}
           </div>
         </div>
