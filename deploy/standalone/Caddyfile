@@ -1,9 +1,9 @@
-image.twotop.icu {
+image.onetopai.com {
   encode gzip zstd
   reverse_proxy app:3000
 }
 
-http://154.219.121.64 {
+http://15.204.120.13 {
   encode gzip zstd
   reverse_proxy app:3000
 }
