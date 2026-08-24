@@ -229,7 +229,7 @@ export default function Login() {
             </div>
 
             <form className="mt-7 space-y-4" onSubmit={submit} noValidate>
-              {mode === "register" && requireEmailVerification && (
+              {mode === "register" && (
                 <label className="block">
                   <span className="mb-2 block text-sm font-medium text-slate-700">
                     昵称
