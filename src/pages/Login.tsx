@@ -269,7 +269,7 @@ export default function Login() {
                 </span>
               </label>
 
-              {mode === "register" && (
+              {mode === "register" && requireEmailVerification && (
                 <label className="block">
                   <span className="mb-2 block text-sm font-medium text-slate-700">
                     邮箱验证码
