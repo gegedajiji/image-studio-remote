@@ -42,7 +42,7 @@ export default function Login() {
   const me = trpc.auth.me.useQuery(undefined, { retry: false });
   const registrationConfig = trpc.auth.registrationConfig.useQuery();
   const requireEmailVerification =
-    registrationConfig.data?.requireEmailVerification ?? true;
+    registrationConfig.data?.requireEmailVerification === true;
   useEffect(() => {
     if (me.data) navigate("/workspace", { replace: true });
   }, [me.data, navigate]);
