@@ -14,6 +14,7 @@ import {
   setSessionCookie,
 } from "./localAuth";
 import { getDb } from "./queries/connection";
+import { env } from "./lib/env";
 import { sendRegistrationCodeEmail } from "./emailService";
 import {
   generateVerificationCode,
@@ -40,7 +41,10 @@ const credentialsSchema = z.object({
 export const sendRegistrationCodeInputSchema = z.object({ email: emailSchema });
 export const registrationInputSchema = credentialsSchema.extend({
   name: z.string().trim().min(2, "昵称至少需要 2 个字符").max(40),
-  code: z.string().regex(/^\d{6}$/, "请输入 6 位邮箱验证码"),
+  code: z
+    .string()
+    .regex(/^\d{6}$/, "请输入 6 位邮箱验证码")
+    .optional(),
 });
 
 type RegistrationResult =
@@ -82,6 +86,9 @@ function throwRegistrationSendLimit(limit: "cooldown" | "hourly"): never {
 
 export const authRouter = createRouter({
   me: authedQuery.query(opts => publicUser(opts.ctx.user)),
+  registrationConfig: publicQuery.query(() => ({
+    requireEmailVerification: env.requireEmailVerification,
+  })),
   login: publicQuery
     .input(credentialsSchema)
     .mutation(async ({ ctx, input }) => {
@@ -92,6 +99,12 @@ export const authRouter = createRouter({
   sendRegistrationCode: publicQuery
     .input(sendRegistrationCodeInputSchema)
     .mutation(async ({ input }) => {
+      if (!env.requireEmailVerification) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "邮箱验证已关闭",
+        });
+      }
       const db = getDb();
       const email = normalizeVerificationEmail(input.email);
       const now = new Date();
@@ -216,65 +229,68 @@ export const authRouter = createRouter({
           .for("update");
         if (existingUser) return { status: "conflict" };
 
-        const [record] = await tx
-          .select()
-          .from(registrationEmailCodes)
-          .where(eq(registrationEmailCodes.email, email))
-          .for("update");
-        if (
-          !record ||
-          record.usedAt !== null ||
-          record.expiresAt.getTime() < now.getTime()
-        ) {
-          return { status: "invalid" };
-        }
-        if (record.attempts >= VERIFICATION_CODE_MAX_ATTEMPTS) {
-          return { status: "too_many_attempts" };
-        }
-        if (
-          !verifyRegistrationVerificationCode(
-            email,
-            input.code,
-            record.codeHash
-          )
-        ) {
-          const [attemptResult] = await tx
+        if (env.requireEmailVerification) {
+          const [record] = await tx
+            .select()
+            .from(registrationEmailCodes)
+            .where(eq(registrationEmailCodes.email, email))
+            .for("update");
+          if (
+            !record ||
+            record.usedAt !== null ||
+            record.expiresAt.getTime() < now.getTime()
+          ) {
+            return { status: "invalid" };
+          }
+          if (record.attempts >= VERIFICATION_CODE_MAX_ATTEMPTS) {
+            return { status: "too_many_attempts" };
+          }
+          if (
+            !input.code ||
+            !verifyRegistrationVerificationCode(
+              email,
+              input.code,
+              record.codeHash
+            )
+          ) {
+            const [attemptResult] = await tx
+              .update(registrationEmailCodes)
+              .set({
+                attempts: sql`${registrationEmailCodes.attempts} + 1`,
+                updatedAt: now,
+              })
+              .where(
+                and(
+                  eq(registrationEmailCodes.email, email),
+                  eq(registrationEmailCodes.codeHash, record.codeHash),
+                  isNull(registrationEmailCodes.usedAt),
+                  lt(
+                    registrationEmailCodes.attempts,
+                    VERIFICATION_CODE_MAX_ATTEMPTS
+                  )
+                )
+              );
+            return {
+              status:
+                attemptResult.affectedRows === 1
+                  ? "incorrect"
+                  : "too_many_attempts",
+            };
+          }
+
+          const [consumeResult] = await tx
             .update(registrationEmailCodes)
-            .set({
-              attempts: sql`${registrationEmailCodes.attempts} + 1`,
-              updatedAt: now,
-            })
+            .set({ usedAt: now, updatedAt: now })
             .where(
               and(
                 eq(registrationEmailCodes.email, email),
                 eq(registrationEmailCodes.codeHash, record.codeHash),
                 isNull(registrationEmailCodes.usedAt),
-                lt(
-                  registrationEmailCodes.attempts,
-                  VERIFICATION_CODE_MAX_ATTEMPTS
-                )
+                gte(registrationEmailCodes.expiresAt, now)
               )
             );
-          return {
-            status:
-              attemptResult.affectedRows === 1
-                ? "incorrect"
-                : "too_many_attempts",
-          };
+          if (consumeResult.affectedRows !== 1) return { status: "invalid" };
         }
-
-        const [consumeResult] = await tx
-          .update(registrationEmailCodes)
-          .set({ usedAt: now, updatedAt: now })
-          .where(
-            and(
-              eq(registrationEmailCodes.email, email),
-              eq(registrationEmailCodes.codeHash, record.codeHash),
-              isNull(registrationEmailCodes.usedAt),
-              gte(registrationEmailCodes.expiresAt, now)
-            )
-          );
-        if (consumeResult.affectedRows !== 1) return { status: "invalid" };
 
         const passwordHash = await hashPassword(input.password);
         const [{ value: userCount }] = await tx

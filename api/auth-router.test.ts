@@ -26,14 +26,14 @@ describe("registration email contract", () => {
     });
   });
 
-  it("rejects registration without a valid email code", () => {
+  it("allows the code to be omitted when email verification is disabled", () => {
     expect(
       registrationInputSchema.safeParse({
         name: "Creator",
         email: "creator@example.com",
         password: "password-123",
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       registrationInputSchema.safeParse({
         name: "Creator",

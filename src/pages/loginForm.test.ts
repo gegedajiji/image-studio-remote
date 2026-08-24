@@ -48,5 +48,15 @@ describe("login form helpers", () => {
         confirmPassword: values.password,
       })
     ).toBeNull();
+    expect(
+      validateRegistrationSubmission(
+        {
+          ...values,
+          confirmPassword: values.password,
+          code: "",
+        },
+        { requireEmailVerification: false }
+      )
+    ).toBeNull();
   });
 });

@@ -40,6 +40,9 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
 
   const me = trpc.auth.me.useQuery(undefined, { retry: false });
+  const registrationConfig = trpc.auth.registrationConfig.useQuery();
+  const requireEmailVerification =
+    registrationConfig.data?.requireEmailVerification ?? true;
   useEffect(() => {
     if (me.data) navigate("/workspace", { replace: true });
   }, [me.data, navigate]);
@@ -113,13 +116,16 @@ export default function Login() {
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (mode === "register") {
-      const validationError = validateRegistrationSubmission({
-        name,
-        email,
-        password,
-        confirmPassword,
-        code: verificationCode,
-      });
+      const validationError = validateRegistrationSubmission(
+        {
+          name,
+          email,
+          password,
+          confirmPassword,
+          code: verificationCode,
+        },
+        { requireEmailVerification }
+      );
       if (validationError) {
         toast.error(validationError);
         return;
@@ -128,7 +134,7 @@ export default function Login() {
         name: name.trim(),
         email: normalizeRegistrationEmail(email),
         password,
-        code: verificationCode,
+        code: requireEmailVerification ? verificationCode : undefined,
       });
       return;
     }
@@ -223,7 +229,7 @@ export default function Login() {
             </div>
 
             <form className="mt-7 space-y-4" onSubmit={submit} noValidate>
-              {mode === "register" && (
+              {mode === "register" && requireEmailVerification && (
                 <label className="block">
                   <span className="mb-2 block text-sm font-medium text-slate-700">
                     昵称

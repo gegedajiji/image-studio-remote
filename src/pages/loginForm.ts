@@ -6,6 +6,10 @@ export type RegistrationFormValues = {
   code: string;
 };
 
+type RegistrationValidationOptions = {
+  requireEmailVerification?: boolean;
+};
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function normalizeRegistrationEmail(value: string) {
@@ -26,7 +30,10 @@ export function validateLoginSubmission(email: string, password: string) {
   return null;
 }
 
-export function validateRegistrationSubmission(values: RegistrationFormValues) {
+export function validateRegistrationSubmission(
+  values: RegistrationFormValues,
+  options: RegistrationValidationOptions = {}
+) {
   const trimmedName = values.name.trim();
   if (trimmedName.length < 2) return "昵称至少需要 2 个字符";
   if (trimmedName.length > 40) return "昵称不能超过 40 个字符";
@@ -39,6 +46,11 @@ export function validateRegistrationSubmission(values: RegistrationFormValues) {
   if (values.password !== values.confirmPassword) {
     return "两次输入的密码不一致";
   }
-  if (!/^\d{6}$/.test(values.code)) return "请输入 6 位邮箱验证码";
+  if (
+    options.requireEmailVerification !== false &&
+    !/^\d{6}$/.test(values.code)
+  ) {
+    return "请输入 6 位邮箱验证码";
+  }
   return null;
 }

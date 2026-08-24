@@ -8,6 +8,12 @@ function required(name: string): string {
   return value ?? "";
 }
 
+function boolean(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (!value) return fallback;
+  return !["0", "false", "no", "off"].includes(value);
+}
+
 export const env = {
   appId: required("APP_ID"),
   appSecret: required("APP_SECRET"),
@@ -18,4 +24,5 @@ export const env = {
   ownerUnionId: process.env.OWNER_UNION_ID ?? "",
   resendApiKey: process.env.RESEND_API_KEY ?? "",
   resendFrom: process.env.RESEND_FROM ?? "",
+  requireEmailVerification: boolean("REQUIRE_EMAIL_VERIFICATION", true),
 };
