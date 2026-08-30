@@ -71,7 +71,9 @@ export function classifyGenerationFailure(error: unknown): GenerationFailure {
     /content[_\s-]*policy|safety[_\s-]*(?:system|policy|violation)|moderation[_\s-]*(?:blocked|failed|rejected)|\b(?:prompt|image)\b.*\b(?:unsafe|inappropriate|disallowed)\b/.test(
       text
     ) ||
-    /不合规|未通过.{0,8}审核|审核.{0,8}(?:不通过|拒绝)|内容.{0,8}(?:违规|敏感)|敏感词/.test(text)
+    /safety\s*filter|safety\s*check|prompt\s*(?:violates?|blocked)|image\s*(?:rejected|blocked)|sensitive\s*content|不合规|未通过.{0,8}审核|审核.{0,8}(?:不通过|拒绝)|内容.{0,8}(?:违规|敏感)|敏感词|违反.{0,8}(?:政策|规则)|违规内容/.test(
+      text
+    )
   ) {
     return FAILURES.content_rejected;
   }
@@ -97,6 +99,9 @@ export function classifyGenerationFailure(error: unknown): GenerationFailure {
   return FAILURES.unknown;
 }
 
-export function refundedGenerationMessage(error: unknown) {
-  return `${classifyGenerationFailure(error).message}，本次积分已退回`;
+export function refundedGenerationMessage(error: unknown, refunded = true) {
+  const message = classifyGenerationFailure(error).message;
+  return refunded
+    ? `${message}，本次积分已退回`
+    : `${message}，积分退款处理中，请联系客服核查`;
 }

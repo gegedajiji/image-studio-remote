@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
+  canvasEdges,
+  canvasNodes,
   generations,
   likes,
   modelPricing,
@@ -12,9 +14,10 @@ import {
 import { createRouter, authedQuery, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import {
-  callUpstream,
+  callUpstreamWithFallback,
   decodeReferenceImageDataUrl,
   MAX_REFERENCE_IMAGE_DATA_URL_LENGTH,
+  removeStoredGeneratedImage,
 } from "./imageService";
 import {
   classifyGenerationFailure,
@@ -30,7 +33,11 @@ async function deductQuota(
 ) {
   const db = getDb();
   await db.transaction(async tx => {
-    const [u] = await tx.select().from(users).where(eq(users.id, userId));
+    const [u] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("update");
     if (!u) throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
     const next = u.quota + amount;
     if (next < 0)
@@ -43,6 +50,70 @@ async function deductQuota(
       type,
       remark,
     });
+  });
+}
+
+async function reserveGeneration(
+  userId: number,
+  input: {
+    prompt: string;
+    negativePrompt?: string;
+    model: string;
+    width: number;
+    height: number;
+    cost: number;
+    label: string;
+    generationType: string;
+  }
+) {
+  const db = getDb();
+  return db.transaction(async tx => {
+    const [user] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("update");
+    if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
+    // Re-check the status after taking the row lock. An administrator can ban
+    // an account between the middleware check and this reservation; the
+    // locked row must be authoritative so a banned account cannot still
+    // consume credits or submit an upstream request.
+    if (user.status === "banned") {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "账号已被禁用，无法生图",
+      });
+    }
+    if (user.quota < input.cost) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `额度不足，本次需 ${input.cost} 积分，请先充值`,
+      });
+    }
+
+    const next = user.quota - input.cost;
+    await tx.update(users).set({ quota: next }).where(eq(users.id, userId));
+    await tx.insert(creditLogs).values({
+      userId,
+      amount: -input.cost,
+      balanceAfter: next,
+      type: "generate",
+      remark: `${input.generationType}消费·${input.label}`,
+    });
+    const [{ id }] = await tx
+      .insert(generations)
+      .values({
+        userId,
+        prompt: input.prompt,
+        negativePrompt: input.negativePrompt ?? null,
+        model: input.model,
+        width: input.width,
+        height: input.height,
+        cost: input.cost,
+        status: "pending",
+      })
+      .$returningId();
+    return id;
   });
 }
 
@@ -60,9 +131,9 @@ export const generationRouter = createRouter({
   generate: authedQuery
     .input(
       z.object({
-        prompt: z.string().min(1, "请输入提示词").max(2000),
-        negativePrompt: z.string().max(2000).optional(),
-        pricingId: z.number(),
+        prompt: z.string().trim().min(1, "请输入提示词").max(2000),
+        negativePrompt: z.string().trim().max(2000).optional(),
+        pricingId: z.number().int().positive(),
         referenceImageDataUrl: z
           .string()
           .max(MAX_REFERENCE_IMAGE_DATA_URL_LENGTH, "参考图数据不能超过 14 MB")
@@ -102,6 +173,20 @@ export const generationRouter = createRouter({
           message: "所选模型/尺寸不可用",
         });
       }
+      if (
+        !Number.isInteger(pricing.width) ||
+        !Number.isInteger(pricing.height) ||
+        pricing.width < 64 ||
+        pricing.height < 64 ||
+        pricing.width > 4096 ||
+        pricing.height > 4096 ||
+        pricing.price < 0
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "当前价格配置无效，请联系管理员",
+        });
+      }
 
       // 查找可用上游（按优先级）
       const upstreamList = await db
@@ -119,68 +204,80 @@ export const generationRouter = createRouter({
         });
       }
 
-      // 先扣额度
-      if (ctx.user.quota < pricing.price) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `额度不足，本次需 ${pricing.price} 积分，请先充值`,
-        });
-      }
       const generationType = referenceImage ? "图生图" : "生图";
-      await deductQuota(
-        ctx.user.id,
-        -pricing.price,
-        "generate",
-        `${generationType}消费·${pricing.label}`
-      );
+      // 锁定用户、扣费和创建 pending 记录在同一事务中完成，避免并发超扣或插入失败漏扣。
+      const id = await reserveGeneration(ctx.user.id, {
+        prompt: input.prompt,
+        negativePrompt: input.negativePrompt,
+        model: pricing.model,
+        width: pricing.width,
+        height: pricing.height,
+        cost: pricing.price,
+        label: pricing.label,
+        generationType,
+      });
 
-      // 创建记录
-      const [{ id }] = await db
-        .insert(generations)
-        .values({
-          userId: ctx.user.id,
-          prompt: input.prompt,
-          negativePrompt: input.negativePrompt ?? null,
-          model: pricing.model,
-          width: pricing.width,
-          height: pricing.height,
-          cost: pricing.price,
-          status: "pending",
-        })
-        .$returningId();
-
+      let generatedImageUrl: string | undefined;
       try {
-        const result = await callUpstream(upstream, {
+        const { result } = await callUpstreamWithFallback(upstreamList, {
           prompt: input.prompt,
           negativePrompt: input.negativePrompt,
           width: pricing.width,
           height: pricing.height,
           referenceImage,
         });
-        await db
+        generatedImageUrl = result.imageUrl;
+        const [updateResult] = await db
           .update(generations)
           .set({ status: "success", imageUrl: result.imageUrl })
           .where(eq(generations.id, id));
+        if (updateResult.affectedRows !== 1) {
+          throw new Error("生成记录更新失败");
+        }
       } catch (err) {
         const msg = getRawGenerationError(err);
         const failure = classifyGenerationFailure(err);
         console.error("[generation] upstream request failed", {
           generationId: id,
           userId: ctx.user.id,
-          upstreamId: upstream.id,
+          upstreamIds: upstreamList.map(item => item.id),
           error: msg.slice(0, 500),
         });
-        await db
-          .update(generations)
-          .set({ status: "failed", errorMsg: msg.slice(0, 500) })
-          .where(eq(generations.id, id));
+        try {
+          await db
+            .update(generations)
+            .set({ status: "failed", errorMsg: msg.slice(0, 500) })
+            .where(eq(generations.id, id));
+        } catch (statusError) {
+          console.error("[generation] failed to mark generation failed", {
+            generationId: id,
+            error:
+              statusError instanceof Error
+                ? statusError.message.slice(0, 240)
+                : String(statusError),
+          });
+        }
+        if (generatedImageUrl) await removeStoredGeneratedImage(generatedImageUrl);
         // 失败退款
-        await deductQuota(
-          ctx.user.id,
-          pricing.price,
-          "refund",
-          `${generationType}失败退款·${pricing.label}`
-        );
+        let refunded = true;
+        try {
+          await deductQuota(
+            ctx.user.id,
+            pricing.price,
+            "refund",
+            `${generationType}失败退款·${pricing.label}`
+          );
+        } catch (refundError) {
+          refunded = false;
+          console.error("[generation] refund failed", {
+            generationId: id,
+            userId: ctx.user.id,
+            error:
+              refundError instanceof Error
+                ? refundError.message.slice(0, 240)
+                : String(refundError),
+          });
+        }
         throw new TRPCError({
           code:
             failure.kind === "content_rejected"
@@ -188,7 +285,7 @@ export const generationRouter = createRouter({
               : failure.kind === "rate_limited"
                 ? "TOO_MANY_REQUESTS"
                 : "INTERNAL_SERVER_ERROR",
-          message: refundedGenerationMessage(err),
+          message: refundedGenerationMessage(err, refunded),
         });
       }
 
@@ -209,10 +306,14 @@ export const generationRouter = createRouter({
     )
     .query(async ({ ctx, input }) => {
       const db = getDb();
+      const conditions = [eq(generations.userId, ctx.user.id)];
+      if (input.cursor !== null && input.cursor !== undefined) {
+        conditions.push(sql`${generations.id} < ${input.cursor}`);
+      }
       const rows = await db
         .select()
         .from(generations)
-        .where(eq(generations.userId, ctx.user.id))
+        .where(and(...conditions))
         .orderBy(desc(generations.id))
         .limit(input.limit);
       return rows.map(row => ({
@@ -253,11 +354,49 @@ export const generationRouter = createRouter({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      await db
-        .delete(generations)
+      const [record] = await db
+        .select({ imageUrl: generations.imageUrl })
+        .from(generations)
         .where(
           and(eq(generations.id, input.id), eq(generations.userId, ctx.user.id))
-        );
+        )
+        .limit(1);
+      if (!record) return { ok: true };
+      await db.transaction(async tx => {
+        const nodeRows = await tx
+          .select({ id: canvasNodes.id })
+          .from(canvasNodes)
+          .where(
+            and(
+              eq(canvasNodes.userId, ctx.user.id),
+              eq(canvasNodes.refId, input.id)
+            )
+          );
+        const nodeIds = nodeRows.map(node => node.id);
+        if (nodeIds.length) {
+          await tx.delete(canvasEdges).where(
+            and(
+              eq(canvasEdges.userId, ctx.user.id),
+              or(inArray(canvasEdges.fromId, nodeIds), inArray(canvasEdges.toId, nodeIds))
+            )
+          );
+          await tx.delete(canvasNodes).where(
+            and(
+              eq(canvasNodes.userId, ctx.user.id),
+              inArray(canvasNodes.id, nodeIds)
+            )
+          );
+        }
+        await tx
+          .delete(likes)
+          .where(eq(likes.generationId, input.id));
+        await tx
+          .delete(generations)
+          .where(
+            and(eq(generations.id, input.id), eq(generations.userId, ctx.user.id))
+          );
+      });
+      await removeStoredGeneratedImage(record.imageUrl);
       return { ok: true };
     }),
 });
@@ -311,22 +450,45 @@ export const communityRouter = createRouter({
     .input(z.object({ generationId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
-      const [existing] = await db
-        .select()
-        .from(likes)
-        .where(
-          and(
-            eq(likes.userId, ctx.user.id),
-            eq(likes.generationId, input.generationId)
+      // Lock the target work while checking/inserting the like. This prevents
+      // double-click races and also blocks likes on private/failed/nonexistent works.
+      return db.transaction(async tx => {
+        const [generation] = await tx
+          .select({
+            id: generations.id,
+            isPublic: generations.isPublic,
+            status: generations.status,
+          })
+          .from(generations)
+          .where(eq(generations.id, input.generationId))
+          .for("update");
+        if (!generation || !generation.isPublic || generation.status !== "success") {
+          throw new TRPCError({ code: "NOT_FOUND", message: "作品不存在" });
+        }
+
+        const existing = await tx
+          .select({ id: likes.id })
+          .from(likes)
+          .where(
+            and(
+              eq(likes.userId, ctx.user.id),
+              eq(likes.generationId, input.generationId)
+            )
           )
-        );
-      if (existing) {
-        await db.delete(likes).where(eq(likes.id, existing.id));
-        return { liked: false };
-      }
-      await db
-        .insert(likes)
-        .values({ userId: ctx.user.id, generationId: input.generationId });
-      return { liked: true };
+          .for("update");
+        if (existing.length) {
+          await tx.delete(likes).where(
+            and(
+              eq(likes.userId, ctx.user.id),
+              eq(likes.generationId, input.generationId)
+            )
+          );
+          return { liked: false };
+        }
+        await tx
+          .insert(likes)
+          .values({ userId: ctx.user.id, generationId: input.generationId });
+        return { liked: true };
+      });
     }),
 });

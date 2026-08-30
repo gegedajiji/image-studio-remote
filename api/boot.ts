@@ -9,6 +9,19 @@ import { openApi } from "./openApi";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
+// Baseline security headers for both API and static responses. Keep the
+// policy deliberately small because the existing UI uses inline styles.
+app.use("*", async (c, next) => {
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("X-Frame-Options", "DENY");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (env.isProduction) {
+    c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  await next();
+});
+
 app.use(bodyLimit({ maxSize: 50 * 1024 * 1024 }));
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({

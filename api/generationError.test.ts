@@ -60,4 +60,13 @@ describe("generation failure messages", () => {
       message: "图片生成失败，请稍后重试",
     });
   });
+
+  it("does not claim a refund when the refund transaction failed", () => {
+    expect(refundedGenerationMessage(new Error("network"), false)).toContain(
+      "退款处理中"
+    );
+    expect(refundedGenerationMessage(new Error("network"), false)).not.toContain(
+      "已退回"
+    );
+  });
 });

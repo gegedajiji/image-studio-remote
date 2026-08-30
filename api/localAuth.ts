@@ -7,7 +7,7 @@ import {
 import { compare as compareBcrypt } from "bcryptjs";
 import * as cookie from "cookie";
 import { nanoid } from "nanoid";
-import { count, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { User } from "@db/schema";
 import { users } from "@db/schema";
@@ -41,7 +41,7 @@ export async function verifyPassword(password: string, storedHash: string) {
   );
 }
 
-export function publicUser(user: User) {
+export function publicUser(user: User, options: { includeApiKey?: boolean } = {}) {
   return {
     id: user.id,
     unionId: user.unionId,
@@ -51,7 +51,9 @@ export function publicUser(user: User) {
     role: user.role,
     quota: user.quota,
     status: user.status,
-    apiKey: user.apiKey,
+    // API keys are only returned by the explicitly authenticated profile
+    // endpoint; login/session responses never expose the secret.
+    apiKey: options.includeApiKey ? user.apiKey : null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
     lastSignInAt: user.lastSignInAt,
@@ -91,18 +93,27 @@ export async function createLocalUser(input: {
   }
 
   const db = getDb();
-  const [{ value: userCount }] = await db
-    .select({ value: count() })
-    .from(users);
   const passwordHash = await hashPassword(input.password);
-  const [{ id }] = await db
-    .insert(users)
-    .values(
-      getLocalUserInsertValues({ ...input, email }, passwordHash, userCount)
-    )
-    .$returningId();
-  const [user] = await db.select().from(users).where(eq(users.id, id));
-  return user;
+  return db.transaction(async tx => {
+    // Lock existing rows before assigning the first-user admin role. InnoDB
+    // then serialises concurrent registrations even when the table is empty.
+    const existingUsers = await tx
+      .select({ id: users.id })
+      .from(users)
+      .for("update");
+    const [{ id }] = await tx
+      .insert(users)
+      .values(
+        getLocalUserInsertValues(
+          { ...input, email },
+          passwordHash,
+          existingUsers.length
+        )
+      )
+      .$returningId();
+    const [user] = await tx.select().from(users).where(eq(users.id, id));
+    return user;
+  });
 }
 
 export async function authenticateCredentials(email: string, password: string) {

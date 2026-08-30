@@ -1,7 +1,7 @@
 import * as cookie from "cookie";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, count, eq, gte, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import { Session } from "@contracts/constants";
 import { registrationEmailCodes, users } from "@db/schema";
 import { getSessionCookieOptions } from "./lib/cookies";
@@ -293,16 +293,19 @@ export const authRouter = createRouter({
         }
 
         const passwordHash = await hashPassword(input.password);
-        const [{ value: userCount }] = await tx
-          .select({ value: count() })
-          .from(users);
+        // Lock the existing user rows while deciding who receives the first
+        // admin role. This serialises concurrent first registrations.
+        const existingUsers = await tx
+          .select({ id: users.id })
+          .from(users)
+          .for("update");
         const [{ id }] = await tx
           .insert(users)
           .values(
             getLocalUserInsertValues(
               { name: input.name, email },
               passwordHash,
-              userCount
+              existingUsers.length
             )
           )
           .$returningId();

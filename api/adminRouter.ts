@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, like, ne, or, sql } from "drizzle-orm";
 import {
   cardKeys,
   creditLogs,
@@ -19,6 +19,38 @@ function makeCardCode() {
   const raw = randomBytes(16);
   const chars = Array.from(raw, (b) => alphabet[b % alphabet.length]).join("");
   return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}-${chars.slice(12)}`;
+}
+
+function normalizeUpstreamBaseUrl(
+  provider: "demo" | "openai",
+  baseUrl: string | undefined
+) {
+  if (provider === "demo") return null;
+  const value = baseUrl?.trim().replace(/\/+$/, "");
+  if (!value) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "OpenAI 兼容上游需填写 Base URL",
+    });
+  }
+  try {
+    const parsed = new URL(value);
+    if (
+      (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      throw new Error("invalid");
+    }
+  } catch {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Base URL 格式无效，请填写完整的 http(s) 地址",
+    });
+  }
+  return value;
 }
 
 export const adminRouter = createRouter({
@@ -53,28 +85,34 @@ export const adminRouter = createRouter({
   // ===== 上游管理 =====
   upstreams: createRouter({
     list: adminQuery.query(async () => {
-      return getDb().select().from(upstreams).orderBy(desc(upstreams.priority), desc(upstreams.id));
+      const rows = await getDb()
+        .select()
+        .from(upstreams)
+        .orderBy(desc(upstreams.priority), desc(upstreams.id));
+      // API keys are write-only from the admin UI; never send them back to the browser.
+      return rows.map(upstream => ({
+        ...upstream,
+        apiKey: null,
+      }));
     }),
     create: adminQuery
       .input(
         z.object({
-          name: z.string().min(1).max(255),
+          name: z.string().trim().min(1).max(255),
           provider: z.enum(["demo", "openai"]),
-          baseUrl: z.string().max(512).optional(),
+          baseUrl: z.string().trim().max(512).optional(),
           apiKey: z.string().max(512).optional(),
-          model: z.string().min(1).max(255),
+          model: z.string().trim().min(1).max(255),
           priority: z.number().int().default(0),
         }),
       )
       .mutation(async ({ input }) => {
-        if (input.provider === "openai" && !input.baseUrl) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "OpenAI 兼容上游需填写 Base URL" });
-        }
+        const baseUrl = normalizeUpstreamBaseUrl(input.provider, input.baseUrl);
         await getDb().insert(upstreams).values({
           name: input.name,
           provider: input.provider,
-          baseUrl: input.baseUrl || null,
-          apiKey: input.apiKey || null,
+          baseUrl,
+          apiKey: input.apiKey?.trim() || null,
           model: input.model,
           priority: input.priority,
         });
@@ -84,23 +122,24 @@ export const adminRouter = createRouter({
       .input(
         z.object({
           id: z.number(),
-          name: z.string().min(1).max(255),
+          name: z.string().trim().min(1).max(255),
           provider: z.enum(["demo", "openai"]),
-          baseUrl: z.string().max(512).optional(),
+          baseUrl: z.string().trim().max(512).optional(),
           apiKey: z.string().max(512).optional(),
-          model: z.string().min(1).max(255),
+          model: z.string().trim().min(1).max(255),
           priority: z.number().int(),
           enabled: z.boolean(),
         }),
       )
       .mutation(async ({ input }) => {
+        const baseUrl = normalizeUpstreamBaseUrl(input.provider, input.baseUrl);
         await getDb()
           .update(upstreams)
           .set({
             name: input.name,
             provider: input.provider,
-            baseUrl: input.baseUrl || null,
-            apiKey: input.apiKey || null,
+            baseUrl,
+            ...(input.apiKey?.trim() ? { apiKey: input.apiKey.trim() } : {}),
             model: input.model,
             priority: input.priority,
             enabled: input.enabled,
@@ -134,41 +173,86 @@ export const adminRouter = createRouter({
         const cond = input.keyword
           ? or(like(users.name, `%${input.keyword}%`), like(users.email, `%${input.keyword}%`))
           : undefined;
-        return db.select().from(users).where(cond).orderBy(desc(users.id)).limit(input.limit);
+        return db
+          .select({
+            id: users.id,
+            unionId: users.unionId,
+            name: users.name,
+            email: users.email,
+            avatar: users.avatar,
+            role: users.role,
+            quota: users.quota,
+            status: users.status,
+            passwordHash: sql<string | null>`NULL`,
+            apiKey: sql<string | null>`NULL`,
+            createdAt: users.createdAt,
+            updatedAt: users.updatedAt,
+            lastSignInAt: users.lastSignInAt,
+          })
+          .from(users)
+          .where(cond)
+          .orderBy(desc(users.id))
+          .limit(input.limit);
       }),
     update: adminQuery
       .input(
         z.object({
           id: z.number(),
-          quota: z.number().int().min(0).optional(),
+          quota: z.number().int().min(0).max(2_000_000_000).optional(),
           status: z.enum(["active", "banned"]).optional(),
           role: z.enum(["user", "admin"]).optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
         const db = getDb();
-        const [target] = await db.select().from(users).where(eq(users.id, input.id));
-        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
+        await db.transaction(async tx => {
+          const activeAdmins = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(and(eq(users.role, "admin"), eq(users.status, "active")))
+            .for("update");
+          const [target] = await tx
+            .select()
+            .from(users)
+            .where(eq(users.id, input.id))
+            .for("update");
+          if (!target) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
+          }
 
-        // 额度变更记录流水
-        if (input.quota !== undefined && input.quota !== target.quota) {
-          const delta = input.quota - target.quota;
-          await db.insert(creditLogs).values({
-            userId: input.id,
-            amount: delta,
-            balanceAfter: input.quota,
-            type: "admin_adjust",
-            remark: `管理员调整（操作人 #${ctx.user.id}）`,
-          });
-        }
-        await db
-          .update(users)
-          .set({
-            ...(input.quota !== undefined ? { quota: input.quota } : {}),
-            ...(input.status ? { status: input.status } : {}),
-            ...(input.role ? { role: input.role } : {}),
-          })
-          .where(eq(users.id, input.id));
+          const nextQuota = input.quota ?? target.quota;
+          const nextRole = input.role ?? target.role;
+          const nextStatus = input.status ?? target.status;
+          if (
+            target.role === "admin" &&
+            target.status === "active" &&
+            (nextRole !== "admin" || nextStatus !== "active") &&
+            activeAdmins.length <= 1
+          ) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "至少需要保留一个可用管理员账号",
+            });
+          }
+          // 额度流水与用户余额更新必须在同一事务中，并基于锁定后的余额计算。
+          if (nextQuota !== target.quota) {
+            await tx.insert(creditLogs).values({
+              userId: input.id,
+              amount: nextQuota - target.quota,
+              balanceAfter: nextQuota,
+              type: "admin_adjust",
+              remark: `管理员调整（操作人 #${ctx.user.id}）`,
+            });
+          }
+          await tx
+            .update(users)
+            .set({
+              ...(input.quota !== undefined ? { quota: nextQuota } : {}),
+              ...(input.status ? { status: input.status } : {}),
+              ...(input.role ? { role: input.role } : {}),
+            })
+            .where(eq(users.id, input.id));
+        });
         return { ok: true };
       }),
   }),
@@ -189,7 +273,25 @@ export const adminRouter = createRouter({
         }),
       )
       .mutation(async ({ input }) => {
-        await getDb().insert(modelPricing).values(input);
+        const db = getDb();
+        const [duplicate] = await db
+          .select({ id: modelPricing.id })
+          .from(modelPricing)
+          .where(
+            and(
+              eq(modelPricing.model, input.model),
+              eq(modelPricing.width, input.width),
+              eq(modelPricing.height, input.height)
+            )
+          )
+          .limit(1);
+        if (duplicate) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "该模型与尺寸已存在",
+          });
+        }
+        await db.insert(modelPricing).values(input);
         return { ok: true };
       }),
     update: adminQuery
@@ -204,7 +306,34 @@ export const adminRouter = createRouter({
         }),
       )
       .mutation(async ({ input }) => {
-        await getDb()
+        const db = getDb();
+        const [current] = await db
+          .select({ model: modelPricing.model })
+          .from(modelPricing)
+          .where(eq(modelPricing.id, input.id))
+          .limit(1);
+        if (!current) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "价格配置不存在" });
+        }
+        const [duplicate] = await db
+          .select({ id: modelPricing.id })
+          .from(modelPricing)
+          .where(
+            and(
+              eq(modelPricing.model, current.model),
+              eq(modelPricing.width, input.width),
+              eq(modelPricing.height, input.height),
+              ne(modelPricing.id, input.id)
+            )
+          )
+          .limit(1);
+        if (duplicate) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "该模型与尺寸已存在",
+          });
+        }
+        await db
           .update(modelPricing)
           .set({
             label: input.label,
@@ -256,24 +385,24 @@ export const adminRouter = createRouter({
       .input(
         z.object({
           count: z.number().int().min(1).max(200),
-          credits: z.number().int().min(1),
+          credits: z.number().int().min(1).max(1_000_000_000),
           remark: z.string().max(255).optional(),
         }),
       )
       .mutation(async ({ input }) => {
         const db = getDb();
         const batchNo = `B${Date.now().toString(36).toUpperCase()}`;
-        const codes: string[] = [];
-        for (let i = 0; i < input.count; i++) {
-          const code = makeCardCode();
-          codes.push(code);
-          await db.insert(cardKeys).values({
-            code,
-            credits: input.credits,
-            batchNo,
-            remark: input.remark ?? null,
-          });
-        }
+        const codes = Array.from({ length: input.count }, () => makeCardCode());
+        await db.transaction(async tx => {
+          await tx.insert(cardKeys).values(
+            codes.map(code => ({
+              code,
+              credits: input.credits,
+              batchNo,
+              remark: input.remark ?? null,
+            }))
+          );
+        });
         return { batchNo, codes };
       }),
     setStatus: adminQuery

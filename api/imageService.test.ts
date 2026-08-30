@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Upstream } from "@db/schema";
 import {
   callUpstream,
+  callUpstreamWithFallback,
   decodeReferenceImageDataUrl,
   MAX_REFERENCE_IMAGE_DATA_URL_LENGTH,
   persistGeneratedImage,
+  persistGeneratedImageUrl,
 } from "./imageService";
 
 let testDir: string | undefined;
@@ -52,8 +54,10 @@ function dataUrl(mimeType: string, buffer: Buffer) {
   return `data:${mimeType};base64,${buffer.toString("base64")}`;
 }
 
-function imageResponse(url = "https://cdn.example.test/result.png") {
-  return new Response(JSON.stringify({ data: [{ url }] }), {
+function imageResponse() {
+  // Keep request-format tests independent of a second CDN fetch. The remote
+  // URL persistence path is covered by its dedicated test above.
+  return new Response(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
@@ -65,18 +69,61 @@ describe("generated image persistence", () => {
     process.env.GENERATED_IMAGE_DIR = testDir;
 
     const publicUrl = await persistGeneratedImage(
-      `data:image/png;base64,${Buffer.from("png-fixture").toString("base64")}`
+      dataUrl("image/png", png)
     );
     const stored = await readFile(path.join(testDir, path.basename(publicUrl)));
 
     expect(publicUrl).toMatch(/^\/generated\/[a-f0-9-]+\.png$/);
-    expect(stored.toString()).toBe("png-fixture");
+    expect(stored).toEqual(png);
+  });
+
+  it("rejects image data with an invalid signature", async () => {
+    await expect(
+      persistGeneratedImage(
+        `data:image/png;base64,${Buffer.from("not-a-png").toString("base64")}`
+      )
+    ).rejects.toThrow("无效的图片数据");
+  });
+
+  it("downloads and stores a remote image instead of retaining its expiring URL", async () => {
+    testDir = await mkdtemp(path.join(tmpdir(), "mirage-image-"));
+    process.env.GENERATED_IMAGE_DIR = testDir;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(png, {
+        status: 200,
+        headers: { "Content-Type": "image/png" },
+      })
+    );
+
+    const publicUrl = await persistGeneratedImageUrl(
+      "https://cdn.example.test/temporary.png"
+    );
+    expect(publicUrl).toMatch(/^\/generated\/[a-f0-9-]+\.png$/);
+    await expect(readFile(path.join(testDir, path.basename(publicUrl)))).resolves.toEqual(png);
   });
 
   it("rejects unsupported data URLs", async () => {
     await expect(
       persistGeneratedImage("data:text/plain;base64,SGVsbG8=")
     ).rejects.toThrow("不支持的图片数据格式");
+  });
+
+  it("accepts unpadded and URL-safe base64 returned by gateways", async () => {
+    testDir = await mkdtemp(path.join(tmpdir(), "mirage-image-"));
+    process.env.GENERATED_IMAGE_DIR = testDir;
+    const encoded = png
+      .toString("base64")
+      .replace(/=/g, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+    const publicUrl = await persistGeneratedImage(`DATA:IMAGE/PNG;BASE64,${encoded}`);
+    await expect(readFile(path.join(testDir, path.basename(publicUrl)))).resolves.toEqual(png);
+  });
+
+  it("blocks private hosts when caching a remote image", async () => {
+    await expect(persistGeneratedImageUrl("http://127.0.0.1/secret.png")).rejects.toThrow(
+      "不安全"
+    );
   });
 });
 
@@ -194,5 +241,31 @@ describe("upstream request format", () => {
     expect(image.name).toBe("reference.png");
     expect(image.type).toBe("image/png");
     expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
+  });
+
+  it("falls back to the next upstream after a transient failure", async () => {
+    const first: Upstream = { ...upstream, id: 1, name: "primary", priority: 100 };
+    const second: Upstream = { ...upstream, id: 2, name: "backup", priority: 90 };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("busy", { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    testDir = await mkdtemp(path.join(tmpdir(), "mirage-image-"));
+    process.env.GENERATED_IMAGE_DIR = testDir;
+
+    const result = await callUpstreamWithFallback([first, second], {
+      prompt: "a quiet lake",
+      width: 1024,
+      height: 1024,
+    });
+
+    expect(result.upstream.id).toBe(2);
+    expect(result.result.imageUrl).toMatch(/^\/generated\//);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

@@ -62,7 +62,7 @@ export const userRouter = createRouter({
       .select()
       .from(users)
       .where(eq(users.id, ctx.user.id));
-    return u ? publicUser(u) : null;
+    return u ? publicUser(u, { includeApiKey: true }) : null;
   }),
 
   updateProfile: authedQuery
@@ -81,7 +81,7 @@ export const userRouter = createRouter({
         .select()
         .from(users)
         .where(eq(users.id, ctx.user.id));
-      return publicUser(user);
+      return publicUser(user, { includeApiKey: true });
     }),
 
   updateAvatar: authedQuery
@@ -116,7 +116,7 @@ export const userRouter = createRouter({
         .select()
         .from(users)
         .where(eq(users.id, current.id));
-      return publicUser(user);
+      return publicUser(user, { includeApiKey: true });
     }),
 
   sendPasswordCode: authedQuery.mutation(async ({ ctx }) => {
@@ -339,7 +339,8 @@ export const userRouter = createRouter({
         const [card] = await tx
           .select()
           .from(cardKeys)
-          .where(eq(cardKeys.code, code));
+          .where(eq(cardKeys.code, code))
+          .for("update");
         if (!card)
           throw new TRPCError({ code: "NOT_FOUND", message: "卡密不存在" });
         if (card.status === "redeemed")
@@ -356,19 +357,35 @@ export const userRouter = createRouter({
         const [u] = await tx
           .select()
           .from(users)
-          .where(eq(users.id, ctx.user.id));
+          .where(eq(users.id, ctx.user.id))
+          .for("update");
         if (!u)
           throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
+        if (u.status === "banned") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "账号已被禁用" });
+        }
 
         const next = u.quota + card.credits;
-        await tx
+        if (next > 2_000_000_000) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "兑换后额度超过上限，请联系管理员",
+          });
+        }
+        const [cardUpdate] = await tx
           .update(cardKeys)
           .set({
             status: "redeemed",
             redeemedById: ctx.user.id,
             redeemedAt: new Date(),
           })
-          .where(eq(cardKeys.id, card.id));
+          .where(and(eq(cardKeys.id, card.id), eq(cardKeys.status, "unused")));
+        if (cardUpdate.affectedRows !== 1) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "该卡密状态已变化，请刷新后重试",
+          });
+        }
         await tx
           .update(users)
           .set({ quota: next })
