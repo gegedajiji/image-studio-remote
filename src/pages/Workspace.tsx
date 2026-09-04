@@ -219,6 +219,18 @@ export default function Workspace() {
     }
 
     const updateScrollState = () => {
+      const firstCard = element.querySelector<HTMLElement>("[data-history-card]");
+      const grid = firstCard?.parentElement;
+      const rowGap = grid
+        ? Number.parseFloat(getComputedStyle(grid).rowGap) || 12
+        : 12;
+      if (firstCard) {
+        const cardHeight = Math.max(
+          96,
+          Math.ceil((element.clientHeight - rowGap * 3) / 3),
+        );
+        element.style.setProperty("--history-card-height", `${cardHeight}px`);
+      }
       const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
       const nextState = {
         canScrollPrev: element.scrollTop > 1,
@@ -248,8 +260,15 @@ export default function Workspace() {
   const scrollHistory = (direction: -1 | 1) => {
     const element = historyScrollRef.current;
     if (!element) return;
+    const firstCard = element.querySelector<HTMLElement>("[data-history-card]");
+    const rowGap = firstCard?.parentElement
+      ? Number.parseFloat(getComputedStyle(firstCard.parentElement).rowGap) || 12
+      : 12;
+    const step = firstCard
+      ? firstCard.offsetHeight + rowGap
+      : Math.max(180, Math.round(element.clientHeight * 0.72));
     element.scrollBy({
-      top: direction * Math.max(180, Math.round(element.clientHeight * 0.72)),
+      top: direction * step,
       behavior: "smooth",
     });
   };
@@ -782,12 +801,12 @@ export default function Workspace() {
                 {t("workspace.history")}
               </h3>
               {historyItems.length > 0 ? (
-              <div className="relative min-h-0 flex-1">
+              <div className="relative flex min-h-0 flex-1 flex-col">
                 <button
                   type="button"
                   onClick={() => scrollHistory(-1)}
                   disabled={!historyScrollState.canScrollPrev || historyQuery.isFetching}
-                  className="absolute left-1/2 top-1 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
+                  className="mx-auto my-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
                   aria-label={t("workspace.historyScrollUp")}
                   title={t("workspace.historyScrollUp")}
                 >
@@ -795,13 +814,15 @@ export default function Workspace() {
                 </button>
                 <div
                   ref={historyScrollRef}
-                  className="history-scroll h-full overflow-x-hidden overflow-y-auto scroll-smooth px-1 py-12"
+                  className="history-scroll min-h-0 flex-1 overflow-x-hidden overflow-y-auto scroll-smooth px-1"
                 >
                   <div className="grid grid-cols-1 gap-3">
                     {historyItems.map((g) => (
                       <div
                         key={g.id}
-                        className="group relative h-[clamp(132px,calc((100vh-300px)/3),220px)] w-full shrink-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white/65 transition-all duration-300 hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)]"
+                        data-history-card
+                        style={{ height: "var(--history-card-height, 132px)" }}
+                        className="group relative w-full shrink-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white/65 transition-all duration-300 hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)]"
                         onClick={() => setPreview(g)}
                       >
                         <img
@@ -848,7 +869,7 @@ export default function Workspace() {
                   type="button"
                   onClick={() => scrollHistory(1)}
                   disabled={!historyScrollState.canScrollNext || historyQuery.isFetching}
-                  className="absolute bottom-1 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
+                  className="mx-auto my-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
                   aria-label={t("workspace.historyScrollDown")}
                   title={t("workspace.historyScrollDown")}
                 >
