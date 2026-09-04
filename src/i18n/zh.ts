@@ -110,6 +110,8 @@ export const zh = {
     historyPageSuffix: "页",
     historyPrev: "上一页",
     historyNext: "下一页",
+    historyScrollPrev: "向左滚动历史记录",
+    historyScrollNext: "向右滚动历史记录",
     noHistory: "还没有生图记录",
     published: "已发布",
     private: "私有",

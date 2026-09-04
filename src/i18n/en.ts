@@ -119,6 +119,8 @@ export const en: Dict = {
     historyPageSuffix: "",
     historyPrev: "Previous",
     historyNext: "Next",
+    historyScrollPrev: "Scroll history left",
+    historyScrollNext: "Scroll history right",
     noHistory: "No generations yet",
     published: "Published",
     private: "Private",

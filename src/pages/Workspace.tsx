@@ -161,7 +161,12 @@ export default function Workspace() {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const negativeRef = useRef<HTMLTextAreaElement | null>(null);
   const previewAreaRef = useRef<HTMLDivElement | null>(null);
+  const historyScrollRef = useRef<HTMLDivElement | null>(null);
   const referenceImageInputRef = useRef<HTMLInputElement | null>(null);
+  const [historyScrollState, setHistoryScrollState] = useState({
+    canScrollPrev: false,
+    canScrollNext: false,
+  });
 
   useEffect(() => {
     try {
@@ -194,9 +199,52 @@ export default function Workspace() {
     pricingQuery.data?.find((p) => p.id === pricingId) ??
     navigationPricing ??
     pricingQuery.data?.[0];
-  const historyItems = historyQuery.data?.slice(0, HISTORY_PAGE_SIZE) ?? [];
+  const historyRows = historyQuery.data?.slice(0, HISTORY_PAGE_SIZE) ?? [];
+  const historyItems = historyRows.filter(
+    (generation) => generation.status === "success" && Boolean(generation.imageUrl),
+  );
   const hasNextHistoryPage = historyQuery.data?.length === HISTORY_PAGE_SIZE + 1;
   const hasPreviousHistoryPage = historyPage > 0;
+
+  useEffect(() => {
+    const element = historyScrollRef.current;
+    if (!element) {
+      setHistoryScrollState({ canScrollPrev: false, canScrollNext: false });
+      return;
+    }
+
+    const updateScrollState = () => {
+      const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
+      const nextState = {
+        canScrollPrev: element.scrollLeft > 1,
+        canScrollNext: element.scrollLeft < maxScrollLeft - 1,
+      };
+      setHistoryScrollState((current) =>
+        current.canScrollPrev === nextState.canScrollPrev &&
+        current.canScrollNext === nextState.canScrollNext
+          ? current
+          : nextState,
+      );
+    };
+
+    element.scrollLeft = 0;
+    updateScrollState();
+    element.addEventListener("scroll", updateScrollState, { passive: true });
+    window.addEventListener("resize", updateScrollState);
+    return () => {
+      element.removeEventListener("scroll", updateScrollState);
+      window.removeEventListener("resize", updateScrollState);
+    };
+  }, [historyItems.length, historyPage, historyRows[0]?.id]);
+
+  const scrollHistory = (direction: -1 | 1) => {
+    const element = historyScrollRef.current;
+    if (!element) return;
+    element.scrollBy({
+      left: direction * Math.max(240, Math.round(element.clientWidth * 0.8)),
+      behavior: "smooth",
+    });
+  };
 
   const resetHistoryPagination = () => {
     setHistoryPage(0);
@@ -206,7 +254,7 @@ export default function Workspace() {
 
   const goToNextHistoryPage = () => {
     if (!hasNextHistoryPage || historyQuery.isFetching) return;
-    const lastItem = historyItems[historyItems.length - 1];
+    const lastItem = historyRows[historyRows.length - 1];
     if (!lastItem) return;
     setHistoryCursors((cursors) => [
       ...cursors.slice(0, historyPage + 1),
@@ -383,7 +431,7 @@ export default function Workspace() {
           {/* 左侧：全息控制台 */}
           <div className="w-full lg:w-[400px] shrink-0">
             <div className="lg:sticky lg:top-[72px]">
-            <div className="holo-panel rounded-2xl p-5 lg:flex lg:max-h-[calc(100vh-80px)] lg:flex-col lg:overflow-hidden">
+            <div className="holo-panel rounded-2xl p-5 lg:flex lg:h-[calc(100vh-80px)] lg:max-h-[calc(100vh-80px)] lg:flex-col lg:overflow-hidden">
               <HoloCorners />
               <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1 holo-scroll">
               <div className="flex items-center justify-between mb-4">
@@ -621,12 +669,12 @@ export default function Workspace() {
           </div>
 
           {/* 右侧：预览 + 历史 */}
-          <div className="flex-1 min-w-0">
+          <div className="flex min-w-0 flex-1 flex-col lg:h-[calc(100vh-80px)] lg:min-h-0">
             {/* 当前预览 */}
             <div
               ref={previewAreaRef}
               className={cn(
-                "holo-panel rounded-2xl",
+                "holo-panel shrink-0 rounded-2xl",
                 preview?.imageUrl && "energy-frame",
               )}
             >
@@ -717,61 +765,58 @@ export default function Workspace() {
               {t("workspace.history")}
             </h3>
             {historyItems.length > 0 ? (
-              <>
-                <div className="max-h-[70vh] overflow-y-auto pr-1 lg:max-h-[720px]">
-                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+              <div className="relative h-[280px] min-h-0 flex-none sm:h-[320px] lg:h-auto lg:min-h-[220px] lg:flex-1">
+                <button
+                  type="button"
+                  onClick={() => scrollHistory(-1)}
+                  disabled={!historyScrollState.canScrollPrev || historyQuery.isFetching}
+                  className="absolute left-1 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
+                  aria-label={t("workspace.historyScrollPrev")}
+                  title={t("workspace.historyScrollPrev")}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <div
+                  ref={historyScrollRef}
+                  className="h-full overflow-x-auto overflow-y-hidden scroll-smooth px-12 pb-1 [scrollbar-width:thin]"
+                >
+                  <div className="flex h-full min-w-max gap-4">
                     {historyItems.map((g) => (
                       <div
                         key={g.id}
-                        className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white/65 cursor-pointer hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)] transition-all duration-300"
-                        onClick={() => g.status === "success" && setPreview(g)}
+                        className="group relative h-full w-[min(72vw,260px)] shrink-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white/65 transition-all duration-300 hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)] sm:w-[280px] lg:w-[min(28vw,320px)]"
+                        onClick={() => setPreview(g)}
                       >
-                        {g.status === "success" && g.imageUrl ? (
-                          <img
-                            src={g.imageUrl}
-                            alt={g.prompt}
-                            loading="lazy"
-                            className="aspect-square w-full object-cover"
-                          />
-                        ) : g.status === "failed" ? (
-                          <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 text-slate-400">
-                            <ImageOff className="h-8 w-8" />
-                            <span className="text-xs">{t("workspace.failed")}</span>
-                          </div>
-                        ) : (
-                          <div className="flex aspect-square w-full items-center justify-center">
-                            <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-                          </div>
-                        )}
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white/95 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <p className="text-xs text-slate-600 line-clamp-2">{g.prompt}</p>
+                        <img
+                          src={g.imageUrl ?? ""}
+                          alt={g.prompt}
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white/95 to-transparent p-3 opacity-0 transition-opacity group-hover:opacity-100">
+                          <p className="line-clamp-2 text-xs text-slate-600">{g.prompt}</p>
                           <div className="mt-1.5 flex items-center gap-1.5">
                             {g.isPublic && (
-                              <Badge className="bg-emerald-500/20 text-emerald-600 border-emerald-500/40 text-[10px] px-1.5 py-0">
+                              <Badge className="border-emerald-500/40 bg-emerald-500/20 px-1.5 py-0 text-[10px] text-emerald-600">
                                 {t("workspace.published")}
                               </Badge>
                             )}
-                            {g.status === "success" && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  sendToCanvas(g);
-                                }}
-                                className="ml-auto rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-amber-600"
-                                title={t("workspace.toCanvas")}
-                              >
-                                <Shapes className="h-3.5 w-3.5" />
-                              </button>
-                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                sendToCanvas(g);
+                              }}
+                              className="ml-auto rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-amber-600"
+                              title={t("workspace.toCanvas")}
+                            >
+                              <Shapes className="h-3.5 w-3.5" />
+                            </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 removeMutation.mutate({ id: g.id });
                               }}
-                              className={cn(
-                                "rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-red-500",
-                                g.status !== "success" && "ml-auto",
-                              )}
+                              className="rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-red-500"
                               title={t("common.delete")}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -782,39 +827,49 @@ export default function Workspace() {
                     ))}
                   </div>
                 </div>
-                {(hasPreviousHistoryPage || hasNextHistoryPage) && (
-                  <div className="mt-4 flex items-center justify-center gap-3 text-sm text-slate-500">
-                    <button
-                      type="button"
-                      onClick={goToPreviousHistoryPage}
-                      disabled={!hasPreviousHistoryPage || historyQuery.isFetching}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label={t("workspace.historyPrev")}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      {t("workspace.historyPrev")}
-                    </button>
-                    <span className="min-w-[4.5rem] text-center text-xs font-medium text-slate-500">
-                      {t("workspace.historyPage")} {historyPage + 1} {t("workspace.historyPageSuffix")}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={goToNextHistoryPage}
-                      disabled={!hasNextHistoryPage || historyQuery.isFetching}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label={t("workspace.historyNext")}
-                    >
-                      {t("workspace.historyNext")}
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
-              </>
+                <button
+                  type="button"
+                  onClick={() => scrollHistory(1)}
+                  disabled={!historyScrollState.canScrollNext || historyQuery.isFetching}
+                  className="absolute right-1 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
+                  aria-label={t("workspace.historyScrollNext")}
+                  title={t("workspace.historyScrollNext")}
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </div>
             ) : (
               <div className="holo-panel rounded-2xl py-16 text-center text-slate-400">
                 <HoloCorners />
                 <ImageOff className="mx-auto h-10 w-10 mb-3" />
                 <p className="text-sm">{t("workspace.noHistory")}</p>
+              </div>
+            )}
+            {(hasPreviousHistoryPage || hasNextHistoryPage) && (
+              <div className="mt-4 flex shrink-0 items-center justify-center gap-3 text-sm text-slate-500">
+                <button
+                  type="button"
+                  onClick={goToPreviousHistoryPage}
+                  disabled={!hasPreviousHistoryPage || historyQuery.isFetching}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={t("workspace.historyPrev")}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  {t("workspace.historyPrev")}
+                </button>
+                <span className="min-w-[4.5rem] text-center text-xs font-medium text-slate-500">
+                  {t("workspace.historyPage")} {historyPage + 1} {t("workspace.historyPageSuffix")}
+                </span>
+                <button
+                  type="button"
+                  onClick={goToNextHistoryPage}
+                  disabled={!hasNextHistoryPage || historyQuery.isFetching}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label={t("workspace.historyNext")}
+                >
+                  {t("workspace.historyNext")}
+                  <ChevronRight className="h-4 w-4" />
+                </button>
               </div>
             )}
           </div>
