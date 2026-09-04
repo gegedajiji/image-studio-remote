@@ -317,6 +317,7 @@ export default function Workspace() {
       utils.user.profile.invalidate();
     },
   });
+  const hasRenderedPreview = Boolean(preview?.imageUrl) && !generateMutation.isPending;
 
   const togglePublicMutation = trpc.generation.togglePublic.useMutation({
     onSuccess: (_, vars) => {
@@ -697,22 +698,21 @@ export default function Workspace() {
 
           {/* 右侧：左边预览，右边竖向历史 */}
           <div className="min-w-0 flex-1 xl:grid xl:min-h-[calc(100vh-80px)] xl:grid-cols-[minmax(0,1fr)_clamp(220px,24vw,300px)] xl:items-stretch xl:gap-6">
-            <div className="flex min-w-0 flex-col">
+            <div className="flex min-h-0 min-w-0 flex-col">
               {/* 当前预览 */}
             <div
               ref={previewAreaRef}
               className={cn(
-                "holo-panel shrink-0 overflow-hidden rounded-2xl",
-                preview?.imageUrl ? "energy-frame w-fit max-w-full self-start" : "w-full",
+                "holo-panel relative overflow-hidden rounded-2xl",
+                hasRenderedPreview
+                  ? "energy-frame w-fit max-w-full shrink-0 self-start"
+                  : "flex min-h-0 w-full flex-1",
               )}
             >
               <HoloCorners />
               {generateMutation.isPending ? (
                 <div
-                  className="relative mx-auto w-full overflow-hidden rounded-2xl bg-[radial-gradient(ellipse_at_center,rgba(219,234,254,0.5),rgba(255,255,255,0.94)_78%)]"
-                  style={{
-                    aspectRatio: selected ? `${selected.width} / ${selected.height}` : "16 / 9",
-                  }}
+                  className="relative flex min-h-0 flex-1 w-full overflow-hidden rounded-2xl bg-[radial-gradient(ellipse_at_center,rgba(219,234,254,0.5),rgba(255,255,255,0.94)_78%)]"
                 >
                   <ConvergingStars className="absolute inset-0 h-full w-full" />
                   <div className="absolute inset-x-0 bottom-7 z-10 text-center">
@@ -777,7 +777,7 @@ export default function Workspace() {
                   </div>
                 </div>
               ) : (
-                <div className="flex aspect-video flex-col items-center justify-center gap-3 bg-white/50 text-slate-400">
+                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-white/50 text-slate-400">
                   <div className="relative">
                     <ImageOff className="h-12 w-12" />
                     <div className="absolute -inset-4 rounded-full border border-dashed border-sky-400/30 animate-spin-slow" />
@@ -788,9 +788,11 @@ export default function Workspace() {
             </div>
 
               {/* 能量分隔线 */}
-              <div className="my-8 xl:my-6">
-                <div className="energy-beam" />
-              </div>
+              {hasRenderedPreview && (
+                <div className="my-8 xl:my-6">
+                  <div className="energy-beam" />
+                </div>
+              )}
             </div>
 
             {/* 历史记录 */}
