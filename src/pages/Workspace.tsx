@@ -11,6 +11,8 @@ import { ConvergingStars } from "@/components/effects/ConvergingStars";
 import { burst, burstAtElement } from "@/lib/fx";
 import {
   Wand2,
+  ChevronUp,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Coins,
@@ -217,10 +219,10 @@ export default function Workspace() {
     }
 
     const updateScrollState = () => {
-      const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
+      const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
       const nextState = {
-        canScrollPrev: element.scrollLeft > 1,
-        canScrollNext: element.scrollLeft < maxScrollLeft - 1,
+        canScrollPrev: element.scrollTop > 1,
+        canScrollNext: element.scrollTop < maxScrollTop - 1,
       };
       setHistoryScrollState((current) =>
         current.canScrollPrev === nextState.canScrollPrev &&
@@ -230,13 +232,16 @@ export default function Workspace() {
       );
     };
 
-    element.scrollLeft = 0;
+    element.scrollTop = 0;
     updateScrollState();
     element.addEventListener("scroll", updateScrollState, { passive: true });
     window.addEventListener("resize", updateScrollState);
+    const resizeObserver = new ResizeObserver(updateScrollState);
+    resizeObserver.observe(element);
     return () => {
       element.removeEventListener("scroll", updateScrollState);
       window.removeEventListener("resize", updateScrollState);
+      resizeObserver.disconnect();
     };
   }, [historyItems.length, historyPage, historyRows[0]?.id]);
 
@@ -244,7 +249,7 @@ export default function Workspace() {
     const element = historyScrollRef.current;
     if (!element) return;
     element.scrollBy({
-      left: direction * Math.max(240, Math.round(element.clientWidth * 0.8)),
+      top: direction * Math.max(180, Math.round(element.clientHeight * 0.72)),
       behavior: "smooth",
     });
   };
@@ -671,14 +676,15 @@ export default function Workspace() {
             </div>
           </div>
 
-          {/* 右侧：预览 + 历史 */}
-          <div className="flex min-w-0 flex-1 flex-col lg:min-h-[calc(100vh-80px)]">
-            {/* 当前预览 */}
+          {/* 右侧：左边预览，右边竖向历史 */}
+          <div className="min-w-0 flex-1 xl:grid xl:min-h-[calc(100vh-80px)] xl:grid-cols-[minmax(0,1fr)_clamp(220px,24vw,300px)] xl:items-stretch xl:gap-6">
+            <div className="flex min-w-0 flex-col">
+              {/* 当前预览 */}
             <div
               ref={previewAreaRef}
               className={cn(
                 "holo-panel shrink-0 overflow-hidden rounded-2xl",
-                preview?.imageUrl ? "energy-frame mx-auto w-fit max-w-full self-center" : "w-full",
+                preview?.imageUrl ? "energy-frame w-fit max-w-full self-start" : "w-full",
               )}
             >
               <HoloCorners />
@@ -697,13 +703,13 @@ export default function Workspace() {
                 </div>
               ) : preview?.imageUrl ? (
                 <div className="group relative w-fit max-w-full">
-                  <div className="flex max-w-full justify-center overflow-hidden rounded-t-2xl bg-transparent">
+                  <div className="w-fit max-w-full overflow-hidden rounded-t-2xl bg-transparent">
                     <img
                       key={preview.id}
                       src={preview.imageUrl}
                       alt={preview.prompt}
                       onClick={() => setLightboxOpen(true)}
-                      className="animate-materialize block h-auto w-auto max-h-[70vh] max-w-full cursor-zoom-in object-contain"
+                      className="animate-materialize block h-auto w-auto max-h-[calc(100vh-180px)] max-w-full cursor-zoom-in object-contain"
                     />
                   </div>
                   <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
@@ -762,38 +768,40 @@ export default function Workspace() {
               )}
             </div>
 
-            {/* 能量分隔线 */}
-            <div className="my-8">
-              <div className="energy-beam" />
+              {/* 能量分隔线 */}
+              <div className="my-8 xl:my-6">
+                <div className="energy-beam" />
+              </div>
             </div>
 
             {/* 历史记录 */}
-            <div className="flex min-h-0 flex-1 flex-col">
-              <h3 className="mb-4 shrink-0 text-lg font-bold flex items-center gap-2 text-slate-900">
+            <aside className="holo-panel relative mt-6 flex h-[520px] min-h-0 min-w-0 flex-col rounded-2xl p-4 xl:mt-0 xl:h-[calc(100vh-80px)] xl:min-h-0">
+              <HoloCorners />
+              <h3 className="mb-3 flex shrink-0 items-center gap-2 text-lg font-bold text-slate-900">
                 <Wand2 className="h-5 w-5 text-amber-500" />
                 {t("workspace.history")}
               </h3>
               {historyItems.length > 0 ? (
-              <div className="relative h-[280px] min-h-[280px] flex-none sm:h-[320px] sm:min-h-[320px] lg:h-[320px] lg:min-h-[320px] lg:flex-none">
+              <div className="relative min-h-0 flex-1">
                 <button
                   type="button"
                   onClick={() => scrollHistory(-1)}
                   disabled={!historyScrollState.canScrollPrev || historyQuery.isFetching}
-                  className="absolute left-1 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
-                  aria-label={t("workspace.historyScrollPrev")}
-                  title={t("workspace.historyScrollPrev")}
+                  className="absolute left-1/2 top-1 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
+                  aria-label={t("workspace.historyScrollUp")}
+                  title={t("workspace.historyScrollUp")}
                 >
-                  <ChevronLeft className="h-5 w-5" />
+                  <ChevronUp className="h-5 w-5" />
                 </button>
                 <div
                   ref={historyScrollRef}
-                  className="history-scroll h-full overflow-x-auto overflow-y-hidden scroll-smooth px-12"
+                  className="history-scroll h-full overflow-x-hidden overflow-y-auto scroll-smooth px-1 py-12"
                 >
-                  <div className="flex h-full min-w-max gap-4">
+                  <div className="grid grid-cols-1 gap-3">
                     {historyItems.map((g) => (
                       <div
                         key={g.id}
-                        className="group relative h-full w-[min(72vw,260px)] shrink-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white/65 transition-all duration-300 hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)] sm:w-[280px] lg:w-[min(28vw,320px)]"
+                        className="group relative h-[clamp(132px,calc((100vh-300px)/3),220px)] w-full shrink-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white/65 transition-all duration-300 hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)]"
                         onClick={() => setPreview(g)}
                       >
                         <img
@@ -840,11 +848,11 @@ export default function Workspace() {
                   type="button"
                   onClick={() => scrollHistory(1)}
                   disabled={!historyScrollState.canScrollNext || historyQuery.isFetching}
-                  className="absolute right-1 top-1/2 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
-                  aria-label={t("workspace.historyScrollNext")}
-                  title={t("workspace.historyScrollNext")}
+                  className="absolute bottom-1 left-1/2 z-10 inline-flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-600 shadow-md transition-colors hover:border-sky-300 hover:text-sky-600 disabled:pointer-events-none disabled:opacity-35"
+                  aria-label={t("workspace.historyScrollDown")}
+                  title={t("workspace.historyScrollDown")}
                 >
-                  <ChevronRight className="h-5 w-5" />
+                  <ChevronDown className="h-5 w-5" />
                 </button>
               </div>
               ) : (
@@ -855,12 +863,12 @@ export default function Workspace() {
                 </div>
               )}
               {(hasPreviousHistoryPage || hasNextHistoryPage) && (
-                <div className="mt-4 flex w-full shrink-0 flex-wrap items-center justify-center gap-3 pb-1 text-sm text-slate-500">
+                <div className="mt-3 flex w-full shrink-0 flex-wrap items-center justify-center gap-2 pb-1 text-sm text-slate-500">
                 <button
                   type="button"
                   onClick={goToPreviousHistoryPage}
                   disabled={!hasPreviousHistoryPage || historyQuery.isFetching}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white/75 px-2.5 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label={t("workspace.historyPrev")}
                 >
                   <ChevronLeft className="h-4 w-4" />
@@ -873,7 +881,7 @@ export default function Workspace() {
                   type="button"
                   onClick={goToNextHistoryPage}
                   disabled={!hasNextHistoryPage || historyQuery.isFetching}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white/75 px-2.5 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
                   aria-label={t("workspace.historyNext")}
                 >
                   {t("workspace.historyNext")}
@@ -881,7 +889,7 @@ export default function Workspace() {
                 </button>
                 </div>
               )}
-            </div>
+            </aside>
           </div>
         </div>
       </div>

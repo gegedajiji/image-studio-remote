@@ -566,7 +566,7 @@ body {
   background: rgba(56, 189, 248, 0.65);
 }
 
-/* 历史横向滚动由两侧箭头控制，隐藏原生滚动条避免占用卡片高度。 */
+/* 历史纵向滚动由上下箭头控制，隐藏原生滚动条避免占用卡片空间。 */
 .history-scroll {
   -ms-overflow-style: none;
   scrollbar-width: none;

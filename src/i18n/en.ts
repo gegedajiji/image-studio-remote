@@ -121,6 +121,8 @@ export const en: Dict = {
     historyNext: "Next",
     historyScrollPrev: "Scroll history left",
     historyScrollNext: "Scroll history right",
+    historyScrollUp: "Scroll history up",
+    historyScrollDown: "Scroll history down",
     noHistory: "No generations yet",
     published: "Published",
     private: "Private",
