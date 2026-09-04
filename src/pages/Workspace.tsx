@@ -706,7 +706,7 @@ export default function Workspace() {
                 "holo-panel relative overflow-hidden rounded-2xl",
                 hasRenderedPreview
                   ? "energy-frame w-fit max-w-full shrink-0 self-start"
-                  : "flex min-h-0 w-full flex-1",
+                  : "flex min-h-[260px] w-full flex-1 xl:min-h-0",
               )}
             >
               <HoloCorners />
