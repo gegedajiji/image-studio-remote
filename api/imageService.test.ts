@@ -198,6 +198,7 @@ describe("upstream request format", () => {
       prompt: "a quiet lake",
       negative_prompt: "text",
       size: "1024x1536",
+      quality: "high",
       n: 1,
       response_format: "url",
     });

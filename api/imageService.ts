@@ -411,6 +411,8 @@ export async function callUpstream(
       form.append("model", upstream.model);
       form.append("prompt", prompt);
       form.append("size", `${input.width}x${input.height}`);
+      // The image2 gateway requires an explicit quality for non-square output.
+      if (input.width !== input.height) form.append("quality", "high");
       form.append("n", "1");
       form.append("response_format", "url");
       form.append(
@@ -430,6 +432,7 @@ export async function callUpstream(
           ? { negative_prompt: input.negativePrompt }
           : {}),
         size: `${input.width}x${input.height}`,
+        ...(input.width !== input.height ? { quality: "high" } : {}),
         n: 1,
         response_format: "url",
       });
