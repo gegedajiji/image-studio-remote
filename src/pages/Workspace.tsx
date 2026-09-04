@@ -765,7 +765,7 @@ export default function Workspace() {
               {t("workspace.history")}
             </h3>
             {historyItems.length > 0 ? (
-              <div className="relative h-[280px] min-h-0 flex-none sm:h-[320px] lg:h-auto lg:min-h-[220px] lg:flex-1">
+              <div className="relative h-[280px] min-h-0 flex-none sm:h-[320px] lg:h-auto lg:flex-1">
                 <button
                   type="button"
                   onClick={() => scrollHistory(-1)}
@@ -778,7 +778,7 @@ export default function Workspace() {
                 </button>
                 <div
                   ref={historyScrollRef}
-                  className="h-full overflow-x-auto overflow-y-hidden scroll-smooth px-12 pb-1 [scrollbar-width:thin]"
+                  className="history-scroll h-full overflow-x-auto overflow-y-hidden scroll-smooth px-12"
                 >
                   <div className="flex h-full min-w-max gap-4">
                     {historyItems.map((g) => (

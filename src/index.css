@@ -565,3 +565,14 @@ body {
 .holo-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(56, 189, 248, 0.65);
 }
+
+/* 历史横向滚动由两侧箭头控制，隐藏原生滚动条避免占用卡片高度。 */
+.history-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.history-scroll::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
