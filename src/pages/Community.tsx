@@ -60,6 +60,9 @@ export default function Community() {
   const [page, setPage] = useState(0);
   const [pageCursors, setPageCursors] = useState<Array<number | null>>([null]);
   const [lightbox, setLightbox] = useState<CommunityItem | null>(null);
+  const [lightboxImageRatio, setLightboxImageRatio] = useState<number | null>(
+    null
+  );
   const [commentText, setCommentText] = useState("");
 
   const cursor = pageCursors[page] ?? null;
@@ -131,11 +134,13 @@ export default function Community() {
 
   const openLightbox = (item: CommunityItem) => {
     setLightbox(item);
+    setLightboxImageRatio(null);
     setCommentText("");
   };
 
   const closeLightbox = () => {
     setLightbox(null);
+    setLightboxImageRatio(null);
     setCommentText("");
   };
 
@@ -195,12 +200,13 @@ export default function Community() {
   };
 
   const comments = (commentsQuery.data ?? []) as CommunityComment[];
-  const lightboxRatio =
+  const metadataRatio =
     lightbox && lightbox.width > 0 && lightbox.height > 0
       ? lightbox.width / lightbox.height
       : 1;
+  const lightboxRatio = lightboxImageRatio ?? metadataRatio;
   const lightboxWidth = lightbox
-    ? "min(94vw, " + Math.max(1, 52 * lightboxRatio) + "vh)"
+    ? "min(94vw, " + Math.max(1, 42 * lightboxRatio) + "vh)"
     : "94vw";
 
   return (
@@ -379,172 +385,189 @@ export default function Community() {
             aria-modal="true"
             aria-label={t("community.details")}
           >
-            <div className="shrink-0 bg-slate-50">
+            <div className="flex shrink-0 items-center justify-center overflow-hidden bg-slate-50">
               <img
                 src={lightbox.imageUrl ?? ""}
                 alt={lightbox.prompt}
-                className="block h-auto w-full object-contain"
+                onLoad={event => {
+                  const { naturalWidth, naturalHeight } = event.currentTarget;
+                  if (naturalWidth > 0 && naturalHeight > 0) {
+                    setLightboxImageRatio(naturalWidth / naturalHeight);
+                  }
+                }}
+                className="block h-auto w-auto max-h-[42vh] max-w-full object-contain"
               />
             </div>
-            <div className="min-h-0 max-h-[34vh] overflow-y-auto border-t border-slate-200 p-4 sm:p-5">
-              <div className="flex items-start gap-3">
-                <Avatar className="h-8 w-8 shrink-0">
-                  <AvatarImage src={lightbox.authorAvatar ?? undefined} />
-                  <AvatarFallback className="bg-violet-500 text-xs text-white">
-                    {(lightbox.authorName ?? "U").slice(0, 1).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-slate-700">
-                    {lightbox.authorName ?? t("community.anon")}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {lightbox.model} · {lightbox.width}×{lightbox.height}
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-slate-300 bg-white text-slate-600"
-                    onClick={() => reusePrompt(lightbox)}
-                  >
-                    <Wand2 className="h-3.5 w-3.5" />
-                    {t("community.reusePrompt")}
-                  </Button>
-                  <a
-                    href={lightbox.imageUrl ?? "#"}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-slate-300 bg-white text-slate-600"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      {t("community.original")}
-                    </Button>
-                  </a>
-                  <Button
-                    size="sm"
-                    onClick={() => handleLike(lightbox.id)}
-                    className={cn(
-                      "border-0",
-                      likedSet.has(lightbox.id)
-                        ? "bg-pink-500 text-white"
-                        : "bg-slate-100 text-slate-600 hover:bg-pink-500/60",
-                    )}
-                  >
-                    <Heart
-                      className={cn(
-                        "h-3.5 w-3.5",
-                        likedSet.has(lightbox.id) && "fill-white",
-                      )}
-                    />
-                    {lightbox.likeCount}
-                  </Button>
-                </div>
-              </div>
-              <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
-                {lightbox.prompt}
-              </p>
-              <div className="mt-5 border-t border-slate-100 pt-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <MessageCircle className="h-4 w-4 text-sky-500" />
-                  {t("community.comments")}
-                  <span className="text-xs font-normal text-slate-400">
-                    {comments.length}
-                  </span>
-                </div>
-                {commentsQuery.isLoading ? (
-                  <div className="flex justify-center py-5">
-                    <Loader2 className="h-5 w-5 animate-spin text-sky-500" />
-                  </div>
-                ) : comments.length === 0 ? (
-                  <p className="py-4 text-xs text-slate-400">
-                    {t("community.commentsEmpty")}
-                  </p>
-                ) : (
-                  <div className="mt-3 space-y-3">
-                    {comments.map(comment => {
-                      const canDelete =
-                        user?.role === "admin" || user?.id === comment.userId;
-                      return (
-                        <div key={comment.id} className="flex gap-2">
-                          <Avatar className="h-7 w-7 shrink-0">
-                            <AvatarImage
-                              src={comment.authorAvatar ?? undefined}
-                            />
-                            <AvatarFallback className="bg-sky-500 text-[10px] text-white">
-                              {(comment.authorName ?? "U")
-                                .slice(0, 1)
-                                .toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0 flex-1 rounded-xl bg-slate-50 px-3 py-2">
-                            <div className="flex items-center gap-2">
-                              <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
-                                {comment.authorName ?? t("community.anon")}
-                              </span>
-                              <time className="shrink-0 text-[10px] text-slate-400">
-                                {new Date(comment.createdAt).toLocaleString()}
-                              </time>
-                              {canDelete && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    deleteComment.mutate({ id: comment.id })
-                                  }
-                                  className="rounded p-1 text-slate-400 hover:bg-white hover:text-red-500"
-                                  title={t("community.deleteComment")}
-                                  aria-label={t("community.deleteComment")}
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                            </div>
-                            <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">
-                              {comment.body}
-                            </p>
-                          </div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-slate-200 p-4 sm:p-5">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div className="shrink-0">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <div className="flex min-w-0 flex-1 basis-full items-start gap-3 sm:basis-auto">
+                      <Avatar className="h-8 w-8 shrink-0">
+                        <AvatarImage src={lightbox.authorAvatar ?? undefined} />
+                        <AvatarFallback className="bg-violet-500 text-xs text-white">
+                          {(lightbox.authorName ?? "U").slice(0, 1).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-700">
+                          {lightbox.authorName ?? t("community.anon")}
                         </div>
-                      );
-                    })}
+                        <div className="text-xs text-slate-500">
+                          {lightbox.model} · {lightbox.width}×{lightbox.height}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex w-full max-w-full flex-wrap justify-start gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-slate-300 bg-white text-slate-600"
+                        onClick={() => reusePrompt(lightbox)}
+                      >
+                        <Wand2 className="h-3.5 w-3.5" />
+                        {t("community.reusePrompt")}
+                      </Button>
+                      <a
+                        href={lightbox.imageUrl ?? "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="border-slate-300 bg-white text-slate-600"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          {t("community.original")}
+                        </Button>
+                      </a>
+                      <Button
+                        size="sm"
+                        onClick={() => handleLike(lightbox.id)}
+                        className={cn(
+                          "border-0",
+                          likedSet.has(lightbox.id)
+                            ? "bg-pink-500 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-pink-500/60",
+                        )}
+                      >
+                        <Heart
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            likedSet.has(lightbox.id) && "fill-white",
+                          )}
+                        />
+                        {lightbox.likeCount}
+                      </Button>
+                    </div>
                   </div>
-                )}
-                <form className="mt-4" onSubmit={handleCommentSubmit}>
-                  <Textarea
-                    value={commentText}
-                    onChange={event => setCommentText(event.target.value)}
-                    placeholder={t("community.commentPlaceholder")}
-                    maxLength={COMMENT_MAX_LENGTH}
-                    rows={2}
-                    className="min-h-[72px] resize-none border-slate-200 bg-white text-sm"
-                    disabled={createComment.isPending}
-                  />
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="text-[11px] text-slate-400">
-                      {commentText.length}/{COMMENT_MAX_LENGTH}
+                  <p className="mt-3 max-h-24 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-sm leading-6 text-slate-700">
+                    {lightbox.prompt}
+                  </p>
+                </div>
+                <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-slate-100 pt-4">
+                  <div className="flex shrink-0 items-center gap-2 text-sm font-semibold text-slate-700">
+                    <MessageCircle className="h-4 w-4 text-sky-500" />
+                    {t("community.comments")}
+                    <span className="text-xs font-normal text-slate-400">
+                      {comments.length}
                     </span>
-                    <Button
-                      type="submit"
-                      size="sm"
-                      disabled={
-                        createComment.isPending || commentText.trim().length === 0
-                      }
-                      className="border-0 bg-sky-500 text-white hover:bg-sky-600"
-                    >
-                      {createComment.isPending ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <MessageCircle className="h-3.5 w-3.5" />
-                      )}
-                      {t("community.postComment")}
-                    </Button>
                   </div>
-                </form>
+                  {commentsQuery.isLoading ? (
+                    <div className="flex min-h-0 flex-1 items-center justify-center">
+                      <Loader2 className="h-5 w-5 animate-spin text-sky-500" />
+                    </div>
+                  ) : comments.length === 0 ? (
+                    <p className="min-h-0 flex-1 py-3 text-xs text-slate-400">
+                      {t("community.commentsEmpty")}
+                    </p>
+                  ) : (
+                    <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
+                      <div className="space-y-3">
+                        {comments.map(comment => {
+                          const canDelete =
+                            user?.role === "admin" || user?.id === comment.userId;
+                          return (
+                            <div key={comment.id} className="flex gap-2">
+                              <Avatar className="h-7 w-7 shrink-0">
+                                <AvatarImage
+                                  src={comment.authorAvatar ?? undefined}
+                                />
+                                <AvatarFallback className="bg-sky-500 text-[10px] text-white">
+                                  {(comment.authorName ?? "U")
+                                    .slice(0, 1)
+                                    .toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="min-w-0 flex-1 rounded-xl bg-slate-50 px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
+                                    {comment.authorName ?? t("community.anon")}
+                                  </span>
+                                  <time className="shrink-0 text-[10px] text-slate-400">
+                                    {new Date(comment.createdAt).toLocaleString()}
+                                  </time>
+                                  {canDelete && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        deleteComment.mutate({ id: comment.id })
+                                      }
+                                      className="rounded p-1 text-slate-400 hover:bg-white hover:text-red-500"
+                                      title={t("community.deleteComment")}
+                                      aria-label={t("community.deleteComment")}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                                <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">
+                                  {comment.body}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
+              <form
+                className="mt-4 shrink-0 border-t border-slate-100 pt-4"
+                onSubmit={handleCommentSubmit}
+              >
+                <Textarea
+                  value={commentText}
+                  onChange={event => setCommentText(event.target.value)}
+                  placeholder={t("community.commentPlaceholder")}
+                  maxLength={COMMENT_MAX_LENGTH}
+                  rows={2}
+                  className="min-h-[72px] resize-none border-slate-200 bg-white text-sm"
+                  disabled={createComment.isPending}
+                />
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-slate-400">
+                    {commentText.length}/{COMMENT_MAX_LENGTH}
+                  </span>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={
+                      createComment.isPending || commentText.trim().length === 0
+                    }
+                    className="border-0 bg-sky-500 text-white hover:bg-sky-600"
+                  >
+                    {createComment.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <MessageCircle className="h-3.5 w-3.5" />
+                    )}
+                    {t("community.postComment")}
+                  </Button>
+                </div>
+              </form>
             </div>
           </div>
         </div>

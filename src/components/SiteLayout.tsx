@@ -236,7 +236,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="flex-1 relative z-10">{children}</main>
+      <main className="flex-1 relative z-20">{children}</main>
 
       {/* 页脚 */}
       <footer className="relative z-10 border-t border-slate-200/80 py-8 mt-auto bg-white/65 backdrop-blur-sm">
