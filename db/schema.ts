@@ -210,6 +210,35 @@ export const likes = mysqlTable("likes", {
 
 export type Like = typeof likes.$inferSelect;
 
+// ============ 社区评论 ============
+export const comments = mysqlTable(
+  "comments",
+  {
+    id: serial("id").primaryKey(),
+    generationId: bigint("generationId", {
+      mode: "number",
+      unsigned: true,
+    }).notNull(),
+    userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
+    body: varchar("body", { length: 1000 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt")
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  table => [
+    index("comments_generation_created_idx").on(
+      table.generationId,
+      table.createdAt,
+      table.id
+    ),
+    index("comments_user_created_idx").on(table.userId, table.createdAt),
+  ]
+);
+
+export type Comment = typeof comments.$inferSelect;
+
 // ============ 无限画布节点 ============
 export const canvasNodes = mysqlTable("canvas_nodes", {
   id: serial("id").primaryKey(),

@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import {
   canvasEdges,
   canvasNodes,
+  comments,
   generations,
   likes,
   modelPricing,
@@ -388,6 +389,9 @@ export const generationRouter = createRouter({
           );
         }
         await tx
+          .delete(comments)
+          .where(eq(comments.generationId, input.id));
+        await tx
           .delete(likes)
           .where(eq(likes.generationId, input.id));
         await tx
@@ -406,12 +410,19 @@ export const communityRouter = createRouter({
   list: publicQuery
     .input(
       z.object({
-        limit: z.number().min(1).max(60).default(24),
-        offset: z.number().min(0).default(0),
+        limit: z.number().int().min(1).max(60).default(12),
+        cursor: z.number().int().positive().nullish(),
       })
     )
     .query(async ({ input }) => {
       const db = getDb();
+      const conditions = [
+        eq(generations.isPublic, true),
+        eq(generations.status, "success"),
+      ];
+      if (input.cursor !== null && input.cursor !== undefined) {
+        conditions.push(sql`${generations.id} < ${input.cursor}`);
+      }
       const rows = await db
         .select({
           id: generations.id,
@@ -424,16 +435,132 @@ export const communityRouter = createRouter({
           authorName: users.name,
           authorAvatar: users.avatar,
           likeCount: sql<number>`(SELECT COUNT(*) FROM likes WHERE likes.generationId = ${generations.id})`,
+          commentCount: sql<number>`(SELECT COUNT(*) FROM comments WHERE comments.generationId = ${generations.id})`,
         })
         .from(generations)
         .innerJoin(users, eq(generations.userId, users.id))
-        .where(
-          and(eq(generations.isPublic, true), eq(generations.status, "success"))
-        )
+        .where(and(...conditions))
         .orderBy(desc(generations.id))
-        .limit(input.limit)
-        .offset(input.offset);
-      return rows;
+        .limit(input.limit + 1);
+      const items = rows.slice(0, input.limit);
+      return {
+        items,
+        nextCursor:
+          rows.length > input.limit && items.length > 0
+            ? items[items.length - 1]!.id
+            : null,
+      };
+    }),
+
+  // 公开：作品评论。仅公开且生成成功的作品可读取评论，避免泄露私有作品内容。
+  comments: publicQuery
+    .input(
+      z.object({
+        generationId: z.number().int().positive(),
+        limit: z.number().int().min(1).max(100).default(50),
+      })
+    )
+    .query(async ({ input }) => {
+      return getDb()
+        .select({
+          id: comments.id,
+          generationId: comments.generationId,
+          body: comments.body,
+          createdAt: comments.createdAt,
+          userId: comments.userId,
+          authorName: users.name,
+          authorAvatar: users.avatar,
+        })
+        .from(comments)
+        .innerJoin(users, eq(comments.userId, users.id))
+        .innerJoin(generations, eq(comments.generationId, generations.id))
+        .where(
+          and(
+            eq(comments.generationId, input.generationId),
+            eq(generations.isPublic, true),
+            eq(generations.status, "success")
+          )
+        )
+        .orderBy(asc(comments.createdAt), asc(comments.id))
+        .limit(input.limit);
+    }),
+
+  // 登录：在公开作品下发表评论
+  createComment: authedQuery
+    .input(
+      z.object({
+        generationId: z.number().int().positive(),
+        body: z.string().trim().min(1, "评论内容不能为空").max(1000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      return db.transaction(async tx => {
+        const [generation] = await tx
+          .select({
+            id: generations.id,
+            isPublic: generations.isPublic,
+            status: generations.status,
+          })
+          .from(generations)
+          .where(eq(generations.id, input.generationId))
+          .for("update");
+        if (
+          !generation ||
+          !generation.isPublic ||
+          generation.status !== "success"
+        ) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "作品不存在" });
+        }
+
+        const [{ id }] = await tx
+          .insert(comments)
+          .values({
+            generationId: input.generationId,
+            userId: ctx.user.id,
+            body: input.body,
+          })
+          .$returningId();
+        const [comment] = await tx
+          .select({
+            id: comments.id,
+            generationId: comments.generationId,
+            body: comments.body,
+            createdAt: comments.createdAt,
+            userId: comments.userId,
+            authorName: users.name,
+            authorAvatar: users.avatar,
+          })
+          .from(comments)
+          .innerJoin(users, eq(comments.userId, users.id))
+          .where(eq(comments.id, id))
+          .limit(1);
+        if (!comment) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "评论创建失败",
+          });
+        }
+        return comment;
+      });
+    }),
+
+  // 登录：删除自己的评论，管理员可删除任意评论
+  deleteComment: authedQuery
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const [comment] = await db
+        .select({ userId: comments.userId })
+        .from(comments)
+        .where(eq(comments.id, input.id))
+        .limit(1);
+      if (!comment) return { ok: true };
+      if (comment.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "无权删除该评论" });
+      }
+      await db.delete(comments).where(eq(comments.id, input.id));
+      return { ok: true };
     }),
 
   // 登录：我点赞过的作品 id 列表

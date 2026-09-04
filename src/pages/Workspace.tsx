@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/i18n";
 import { trpc } from "@/providers/trpc";
@@ -40,6 +40,7 @@ const REFERENCE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const REFERENCE_IMAGE_COMPRESS_BYTES = 4 * 1024 * 1024;
 const REFERENCE_IMAGE_MAX_EDGE = 2048;
 const REFERENCE_IMAGE_MIN_EDGE = 64;
+const REUSE_PROMPT_STORAGE_KEY = "mirage-reuse-prompt";
 const REFERENCE_IMAGE_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -54,6 +55,33 @@ type ReferenceImage = {
   height: number;
   size: number;
 };
+
+type WorkspaceNavigationState = {
+  prompt?: unknown;
+  model?: unknown;
+  width?: unknown;
+  height?: unknown;
+};
+
+function readStoredWorkspaceState(): WorkspaceNavigationState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = window.sessionStorage.getItem(REUSE_PROMPT_STORAGE_KEY);
+    if (!stored) return null;
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (parsed && typeof parsed === "object") {
+        return parsed as WorkspaceNavigationState;
+      }
+    } catch {
+      // Support the prompt-only value written by older builds.
+      return { prompt: stored };
+    }
+  } catch {
+    // Ignore storage restrictions and keep the console empty.
+  }
+  return null;
+}
 
 function readAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -99,10 +127,25 @@ export default function Workspace() {
     redirectPath: LOGIN_PATH,
   });
   const { t } = useI18n();
+  const location = useLocation();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
 
-  const [prompt, setPrompt] = useState("");
+  const navigationState = location.state as WorkspaceNavigationState | null;
+  const [storedWorkspaceState] = useState<WorkspaceNavigationState | null>(
+    readStoredWorkspaceState,
+  );
+
+  const [prompt, setPrompt] = useState(() => {
+    const navigationPrompt =
+      typeof navigationState?.prompt === "string" && navigationState.prompt.trim()
+        ? navigationState.prompt
+        : null;
+    if (navigationPrompt) return navigationPrompt;
+    return typeof storedWorkspaceState?.prompt === "string"
+      ? storedWorkspaceState.prompt
+      : "";
+  });
   const [negativePrompt, setNegativePrompt] = useState("");
   const [pricingId, setPricingId] = useState<number | null>(null);
   const [preview, setPreview] = useState<Generation | null>(null);
@@ -120,6 +163,14 @@ export default function Workspace() {
   const previewAreaRef = useRef<HTMLDivElement | null>(null);
   const referenceImageInputRef = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    try {
+      window.sessionStorage.removeItem("mirage-reuse-prompt");
+    } catch {
+      // Ignore storage restrictions after reading the pending prompt.
+    }
+  }, []);
+
   // 打字粒子火花
   useTypingSparks(promptRef);
   useTypingSparks(negativeRef);
@@ -132,7 +183,17 @@ export default function Workspace() {
   );
   const profileQuery = trpc.user.profile.useQuery(undefined, { enabled: isAuthenticated });
 
-  const selected = pricingQuery.data?.find((p) => p.id === pricingId) ?? pricingQuery.data?.[0];
+  const navigationPricing = pricingQuery.data?.find(
+    pricing =>
+      typeof (navigationState?.model ?? storedWorkspaceState?.model) === "string" &&
+      pricing.model === (navigationState?.model ?? storedWorkspaceState?.model) &&
+      pricing.width === (navigationState?.width ?? storedWorkspaceState?.width) &&
+      pricing.height === (navigationState?.height ?? storedWorkspaceState?.height),
+  );
+  const selected =
+    pricingQuery.data?.find((p) => p.id === pricingId) ??
+    navigationPricing ??
+    pricingQuery.data?.[0];
   const historyItems = historyQuery.data?.slice(0, HISTORY_PAGE_SIZE) ?? [];
   const hasNextHistoryPage = historyQuery.data?.length === HISTORY_PAGE_SIZE + 1;
   const hasPreviousHistoryPage = historyPage > 0;
