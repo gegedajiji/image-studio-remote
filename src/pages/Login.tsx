@@ -8,7 +8,6 @@ import {
   Loader2,
   LockKeyhole,
   Mail,
-  Sparkles,
   User,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -167,7 +166,11 @@ export default function Login() {
               aria-label="返回幻镜 AI 首页"
             >
               <span className="flex h-10 w-10 items-center justify-center rounded-md bg-white/90 shadow-lg">
-                <Sparkles className="h-5 w-5 text-sky-600" />
+                <img
+                  src="/favicon.svg"
+                  alt=""
+                  className="h-8 w-8 rounded-[10px]"
+                />
               </span>
               <span className="text-lg font-bold text-slate-900">幻镜 AI</span>
             </button>
@@ -192,7 +195,7 @@ export default function Login() {
               className="mb-10 flex w-fit items-center gap-2 lg:hidden"
               aria-label="返回幻镜 AI 首页"
             >
-              <Sparkles className="h-5 w-5 text-sky-600" />
+              <img src="/favicon.svg" alt="" className="h-6 w-6 rounded-lg" />
               <span className="font-bold text-slate-900">幻镜 AI</span>
             </button>
 

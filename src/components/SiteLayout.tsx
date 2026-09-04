@@ -117,8 +117,8 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="flex h-16 items-center justify-between">
             <Link to="/" className="flex items-center gap-2.5 group">
-              <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 via-amber-400 to-emerald-400 shadow-lg shadow-sky-400/30 group-hover:shadow-amber-400/50 transition-all duration-300 group-hover:scale-105">
-                <Sparkles className="h-5 w-5 text-white transition-transform duration-500 group-hover:rotate-90" />
+              <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-xl shadow-lg shadow-sky-400/30 transition-all duration-300 group-hover:scale-105 group-hover:shadow-amber-400/50">
+                <img src="/favicon.svg" alt="" className="h-full w-full transition-transform duration-500 group-hover:rotate-6" />
                 <div className="absolute -inset-1 rounded-2xl bg-amber-300/25 blur-md opacity-0 group-hover:opacity-100 transition-opacity -z-10" />
               </div>
               <div className="flex flex-col leading-none">
