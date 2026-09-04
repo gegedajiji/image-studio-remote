@@ -11,6 +11,8 @@ import { ConvergingStars } from "@/components/effects/ConvergingStars";
 import { burst, burstAtElement } from "@/lib/fx";
 import {
   Wand2,
+  ChevronLeft,
+  ChevronRight,
   Coins,
   Download,
   Share2,
@@ -43,6 +45,7 @@ const REFERENCE_IMAGE_TYPES = new Set([
   "image/jpeg",
   "image/webp",
 ]);
+const HISTORY_PAGE_SIZE = 12;
 
 type ReferenceImage = {
   dataUrl: string;
@@ -107,6 +110,10 @@ export default function Workspace() {
   const [referenceImage, setReferenceImage] = useState<ReferenceImage | null>(null);
   const [referenceImageBusy, setReferenceImageBusy] = useState(false);
   const [isDraggingReference, setIsDraggingReference] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyCursors, setHistoryCursors] = useState<Array<number | null>>([
+    null,
+  ]);
 
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const negativeRef = useRef<HTMLTextAreaElement | null>(null);
@@ -118,19 +125,45 @@ export default function Workspace() {
   useTypingSparks(negativeRef);
 
   const pricingQuery = trpc.generation.pricing.useQuery();
+  const historyCursor = historyCursors[historyPage] ?? null;
   const historyQuery = trpc.generation.myHistory.useQuery(
-    { limit: 40 },
+    { limit: HISTORY_PAGE_SIZE + 1, cursor: historyCursor },
     { enabled: isAuthenticated },
   );
   const profileQuery = trpc.user.profile.useQuery(undefined, { enabled: isAuthenticated });
 
   const selected = pricingQuery.data?.find((p) => p.id === pricingId) ?? pricingQuery.data?.[0];
+  const historyItems = historyQuery.data?.slice(0, HISTORY_PAGE_SIZE) ?? [];
+  const hasNextHistoryPage = historyQuery.data?.length === HISTORY_PAGE_SIZE + 1;
+  const hasPreviousHistoryPage = historyPage > 0;
+
+  const resetHistoryPagination = () => {
+    setHistoryPage(0);
+    setHistoryCursors([null]);
+    utils.generation.myHistory.invalidate();
+  };
+
+  const goToNextHistoryPage = () => {
+    if (!hasNextHistoryPage || historyQuery.isFetching) return;
+    const lastItem = historyItems[historyItems.length - 1];
+    if (!lastItem) return;
+    setHistoryCursors((cursors) => [
+      ...cursors.slice(0, historyPage + 1),
+      lastItem.id,
+    ]);
+    setHistoryPage((page) => page + 1);
+  };
+
+  const goToPreviousHistoryPage = () => {
+    if (!hasPreviousHistoryPage || historyQuery.isFetching) return;
+    setHistoryPage((page) => Math.max(0, page - 1));
+  };
 
   const generateMutation = trpc.generation.generate.useMutation({
     onSuccess: (record) => {
       toast.success(t("workspace.materialized"));
       setPreview(record);
-      utils.generation.myHistory.invalidate();
+      resetHistoryPagination();
       utils.user.profile.invalidate();
       // 出图爆发
       setTimeout(() => {
@@ -159,7 +192,7 @@ export default function Workspace() {
   const removeMutation = trpc.generation.remove.useMutation({
     onSuccess: () => {
       toast.success(t("workspace.deleted"));
-      utils.generation.myHistory.invalidate();
+      resetHistoryPagination();
       setPreview(null);
     },
   });
@@ -622,69 +655,100 @@ export default function Workspace() {
               <Wand2 className="h-5 w-5 text-amber-500" />
               {t("workspace.history")}
             </h3>
-            {historyQuery.data && historyQuery.data.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {historyQuery.data.map((g) => (
-                  <div
-                    key={g.id}
-                    className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white/65 cursor-pointer hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)] transition-all duration-300"
-                    onClick={() => g.status === "success" && setPreview(g)}
-                  >
-                    {g.status === "success" && g.imageUrl ? (
-                      <img
-                        src={g.imageUrl}
-                        alt={g.prompt}
-                        loading="lazy"
-                        className="aspect-square w-full object-cover"
-                      />
-                    ) : g.status === "failed" ? (
-                      <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 text-slate-400">
-                        <ImageOff className="h-8 w-8" />
-                        <span className="text-xs">{t("workspace.failed")}</span>
-                      </div>
-                    ) : (
-                      <div className="flex aspect-square w-full items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
-                      </div>
-                    )}
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white/95 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <p className="text-xs text-slate-600 line-clamp-2">{g.prompt}</p>
-                      <div className="mt-1.5 flex items-center gap-1.5">
-                        {g.isPublic && (
-                          <Badge className="bg-emerald-500/20 text-emerald-600 border-emerald-500/40 text-[10px] px-1.5 py-0">
-                            {t("workspace.published")}
-                          </Badge>
+            {historyItems.length > 0 ? (
+              <>
+                <div className="max-h-[70vh] overflow-y-auto pr-1 lg:max-h-[720px]">
+                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+                    {historyItems.map((g) => (
+                      <div
+                        key={g.id}
+                        className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white/65 cursor-pointer hover:border-sky-400/60 hover:shadow-[0_0_20px_rgba(56,189,248,0.18)] transition-all duration-300"
+                        onClick={() => g.status === "success" && setPreview(g)}
+                      >
+                        {g.status === "success" && g.imageUrl ? (
+                          <img
+                            src={g.imageUrl}
+                            alt={g.prompt}
+                            loading="lazy"
+                            className="aspect-square w-full object-cover"
+                          />
+                        ) : g.status === "failed" ? (
+                          <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 text-slate-400">
+                            <ImageOff className="h-8 w-8" />
+                            <span className="text-xs">{t("workspace.failed")}</span>
+                          </div>
+                        ) : (
+                          <div className="flex aspect-square w-full items-center justify-center">
+                            <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                          </div>
                         )}
-                        {g.status === "success" && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              sendToCanvas(g);
-                            }}
-                            className="ml-auto rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-amber-600"
-                            title={t("workspace.toCanvas")}
-                          >
-                            <Shapes className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeMutation.mutate({ id: g.id });
-                          }}
-                          className={cn(
-                            "rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-red-500",
-                            g.status !== "success" && "ml-auto",
-                          )}
-                          title={t("common.delete")}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white/95 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <p className="text-xs text-slate-600 line-clamp-2">{g.prompt}</p>
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            {g.isPublic && (
+                              <Badge className="bg-emerald-500/20 text-emerald-600 border-emerald-500/40 text-[10px] px-1.5 py-0">
+                                {t("workspace.published")}
+                              </Badge>
+                            )}
+                            {g.status === "success" && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  sendToCanvas(g);
+                                }}
+                                className="ml-auto rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-amber-600"
+                                title={t("workspace.toCanvas")}
+                              >
+                                <Shapes className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeMutation.mutate({ id: g.id });
+                              }}
+                              className={cn(
+                                "rounded-md bg-white/90 p-1.5 text-slate-500 hover:text-red-500",
+                                g.status !== "success" && "ml-auto",
+                              )}
+                              title={t("common.delete")}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+                {(hasPreviousHistoryPage || hasNextHistoryPage) && (
+                  <div className="mt-4 flex items-center justify-center gap-3 text-sm text-slate-500">
+                    <button
+                      type="button"
+                      onClick={goToPreviousHistoryPage}
+                      disabled={!hasPreviousHistoryPage || historyQuery.isFetching}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label={t("workspace.historyPrev")}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      {t("workspace.historyPrev")}
+                    </button>
+                    <span className="min-w-[4.5rem] text-center text-xs font-medium text-slate-500">
+                      {t("workspace.historyPage")} {historyPage + 1} {t("workspace.historyPageSuffix")}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={goToNextHistoryPage}
+                      disabled={!hasNextHistoryPage || historyQuery.isFetching}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white/75 px-3 transition-colors hover:border-sky-300 hover:text-sky-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label={t("workspace.historyNext")}
+                    >
+                      {t("workspace.historyNext")}
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="holo-panel rounded-2xl py-16 text-center text-slate-400">
                 <HoloCorners />
