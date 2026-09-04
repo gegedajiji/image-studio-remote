@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import {
   canvasEdges,
   canvasNodes,
@@ -307,7 +307,11 @@ export const generationRouter = createRouter({
     )
     .query(async ({ ctx, input }) => {
       const db = getDb();
-      const conditions = [eq(generations.userId, ctx.user.id)];
+      const conditions = [
+        eq(generations.userId, ctx.user.id),
+        eq(generations.status, "success"),
+        isNotNull(generations.imageUrl),
+      ];
       if (input.cursor !== null && input.cursor !== undefined) {
         conditions.push(sql`${generations.id} < ${input.cursor}`);
       }

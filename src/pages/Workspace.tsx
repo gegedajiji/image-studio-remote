@@ -184,7 +184,10 @@ export default function Workspace() {
   const historyCursor = historyCursors[historyPage] ?? null;
   const historyQuery = trpc.generation.myHistory.useQuery(
     { limit: HISTORY_PAGE_SIZE + 1, cursor: historyCursor },
-    { enabled: isAuthenticated },
+    {
+      enabled: isAuthenticated,
+      placeholderData: (previousData) => previousData,
+    },
   );
   const profileQuery = trpc.user.profile.useQuery(undefined, { enabled: isAuthenticated });
 
@@ -669,18 +672,23 @@ export default function Workspace() {
           </div>
 
           {/* 右侧：预览 + 历史 */}
-          <div className="flex min-w-0 flex-1 flex-col lg:h-[calc(100vh-80px)] lg:min-h-0">
+          <div className="flex min-w-0 flex-1 flex-col lg:min-h-[calc(100vh-80px)]">
             {/* 当前预览 */}
             <div
               ref={previewAreaRef}
               className={cn(
-                "holo-panel shrink-0 rounded-2xl",
-                preview?.imageUrl && "energy-frame",
+                "holo-panel shrink-0 overflow-hidden rounded-2xl",
+                preview?.imageUrl ? "energy-frame mx-auto w-fit max-w-full self-center" : "w-full",
               )}
             >
               <HoloCorners />
               {generateMutation.isPending ? (
-                <div className="relative aspect-video overflow-hidden rounded-2xl bg-[radial-gradient(ellipse_at_center,rgba(219,234,254,0.5),rgba(255,255,255,0.94)_78%)]">
+                <div
+                  className="relative mx-auto w-full overflow-hidden rounded-2xl bg-[radial-gradient(ellipse_at_center,rgba(219,234,254,0.5),rgba(255,255,255,0.94)_78%)]"
+                  style={{
+                    aspectRatio: selected ? `${selected.width} / ${selected.height}` : "16 / 9",
+                  }}
+                >
                   <ConvergingStars className="absolute inset-0 h-full w-full" />
                   <div className="absolute inset-x-0 bottom-7 z-10 text-center">
                     <p className="text-sm text-sky-600 font-mono tracking-[0.3em]">{t("workspace.converging")}</p>
@@ -688,14 +696,14 @@ export default function Workspace() {
                   </div>
                 </div>
               ) : preview?.imageUrl ? (
-                <div className="relative group">
-                  <div className="overflow-hidden rounded-t-2xl">
+                <div className="group relative w-fit max-w-full">
+                  <div className="flex max-w-full justify-center overflow-hidden rounded-t-2xl bg-transparent">
                     <img
                       key={preview.id}
                       src={preview.imageUrl}
                       alt={preview.prompt}
                       onClick={() => setLightboxOpen(true)}
-                      className="animate-materialize w-full object-contain max-h-[560px] bg-white/50 cursor-zoom-in"
+                      className="animate-materialize block h-auto w-auto max-h-[70vh] max-w-full cursor-zoom-in object-contain"
                     />
                   </div>
                   <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
@@ -723,9 +731,9 @@ export default function Workspace() {
                       <Share2 className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="border-t border-sky-500/10 px-5 py-4">
-                    <p className="text-sm text-slate-600 line-clamp-2">{preview.prompt}</p>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 font-mono">
+                  <div className="w-full border-t border-sky-500/10 px-5 py-4">
+                    <p className="break-words text-sm text-slate-600 line-clamp-2">{preview.prompt}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 font-mono">
                       <span>{preview.model}</span>
                       <span>·</span>
                       <span>{preview.width}×{preview.height}</span>
@@ -744,7 +752,7 @@ export default function Workspace() {
                   </div>
                 </div>
               ) : (
-                <div className="flex aspect-video flex-col items-center justify-center gap-3 text-slate-400 bg-white/50">
+                <div className="flex aspect-video flex-col items-center justify-center gap-3 bg-white/50 text-slate-400">
                   <div className="relative">
                     <ImageOff className="h-12 w-12" />
                     <div className="absolute -inset-4 rounded-full border border-dashed border-sky-400/30 animate-spin-slow" />
@@ -760,12 +768,13 @@ export default function Workspace() {
             </div>
 
             {/* 历史记录 */}
-            <h3 className="mb-4 text-lg font-bold flex items-center gap-2 text-slate-900">
-              <Wand2 className="h-5 w-5 text-amber-500" />
-              {t("workspace.history")}
-            </h3>
-            {historyItems.length > 0 ? (
-              <div className="relative h-[280px] min-h-0 flex-none sm:h-[320px] lg:h-auto lg:flex-1">
+            <div className="flex min-h-0 flex-1 flex-col">
+              <h3 className="mb-4 shrink-0 text-lg font-bold flex items-center gap-2 text-slate-900">
+                <Wand2 className="h-5 w-5 text-amber-500" />
+                {t("workspace.history")}
+              </h3>
+              {historyItems.length > 0 ? (
+              <div className="relative h-[280px] min-h-[280px] flex-none sm:h-[320px] sm:min-h-[320px] lg:h-[320px] lg:min-h-[320px] lg:flex-none">
                 <button
                   type="button"
                   onClick={() => scrollHistory(-1)}
@@ -838,15 +847,15 @@ export default function Workspace() {
                   <ChevronRight className="h-5 w-5" />
                 </button>
               </div>
-            ) : (
-              <div className="holo-panel rounded-2xl py-16 text-center text-slate-400">
-                <HoloCorners />
-                <ImageOff className="mx-auto h-10 w-10 mb-3" />
-                <p className="text-sm">{t("workspace.noHistory")}</p>
-              </div>
-            )}
-            {(hasPreviousHistoryPage || hasNextHistoryPage) && (
-              <div className="mt-4 flex shrink-0 items-center justify-center gap-3 text-sm text-slate-500">
+              ) : (
+                <div className="holo-panel min-h-[202px] flex-1 rounded-2xl py-16 text-center text-slate-400">
+                  <HoloCorners />
+                  <ImageOff className="mx-auto h-10 w-10 mb-3" />
+                  <p className="text-sm">{t("workspace.noHistory")}</p>
+                </div>
+              )}
+              {(hasPreviousHistoryPage || hasNextHistoryPage) && (
+                <div className="mt-4 flex w-full shrink-0 flex-wrap items-center justify-center gap-3 pb-1 text-sm text-slate-500">
                 <button
                   type="button"
                   onClick={goToPreviousHistoryPage}
@@ -870,8 +879,9 @@ export default function Workspace() {
                   {t("workspace.historyNext")}
                   <ChevronRight className="h-4 w-4" />
                 </button>
-              </div>
-            )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
