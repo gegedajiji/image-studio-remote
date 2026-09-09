@@ -771,7 +771,10 @@ export default function Workspace() {
                             placeholder={t("workspace.modelChoice")}
                             className="min-w-0 flex-1 truncate text-left"
                           >
-                            {selectedModelLabel?.replace(/^GPT\s+/i, "")}
+                            {selectedModelLabel?.replace(
+                              /^GPT\s+Image\s+/i,
+                              ""
+                            )}
                           </SelectValue>
                         </SelectTrigger>
                         <SelectContent className="workspace-select-content holo-panel z-[70]">
