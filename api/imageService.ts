@@ -17,7 +17,31 @@ export type GenerateInput = {
 
 export type GenerateResult = {
   imageUrl: string;
+  width?: number;
+  height?: number;
 };
+
+export function resolveGeneratedImageDimensions(
+  result: GenerateResult,
+  requestedWidth: number,
+  requestedHeight: number
+) {
+  if (
+    typeof result.width === "number" &&
+    Number.isSafeInteger(result.width) &&
+    result.width > 0 &&
+    typeof result.height === "number" &&
+    Number.isSafeInteger(result.height) &&
+    result.height > 0
+  ) {
+    return { width: result.width, height: result.height };
+  }
+
+  return {
+    width: requestedWidth,
+    height: requestedHeight,
+  };
+}
 
 const IMAGE_TYPES = {
   "image/png": "png",
@@ -71,7 +95,8 @@ function decodeBase64(
 
   const normalized = compact.replace(/-/g, "+").replace(/_/g, "/");
   const firstPadding = normalized.indexOf("=");
-  const content = firstPadding === -1 ? normalized : normalized.slice(0, firstPadding);
+  const content =
+    firstPadding === -1 ? normalized : normalized.slice(0, firstPadding);
   const padding = firstPadding === -1 ? "" : normalized.slice(firstPadding);
   if (!/^[A-Za-z0-9+/]*$/.test(content) || !/^={0,2}$/.test(padding)) {
     throw new Error(invalidMessage);
@@ -93,9 +118,7 @@ function decodeBase64(
 
   // Buffer silently ignores malformed trailing bits; compare the canonical
   // representation to ensure those bits were not smuggled in.
-  const canonical = buffer
-    .toString("base64")
-    .replace(/=+$/, "");
+  const canonical = buffer.toString("base64").replace(/=+$/, "");
   if (canonical !== content) throw new Error(invalidMessage);
   return buffer;
 }
@@ -123,7 +146,9 @@ export function decodeReferenceImageDataUrl(dataUrl: string): ReferenceImage {
   return { buffer, mimeType, extension: IMAGE_TYPES[mimeType] };
 }
 
-export async function persistGeneratedImage(dataUrl: string) {
+async function persistGeneratedImageWithMetadata(
+  dataUrl: string
+): Promise<GenerateResult> {
   const match = /^data:(image\/(?:png|jpeg|webp));base64,([\s\S]+)$/i.exec(
     dataUrl
   );
@@ -134,20 +159,46 @@ export async function persistGeneratedImage(dataUrl: string) {
   if (encoded.replace(/\s+/g, "").length > maxEncodedLength) {
     throw new Error("上游返回的图片超过 20 MB");
   }
-  const image = decodeBase64(encoded, MAX_GENERATED_IMAGE_BYTES, "上游返回了无效的图片数据");
+  const image = decodeBase64(
+    encoded,
+    MAX_GENERATED_IMAGE_BYTES,
+    "上游返回了无效的图片数据"
+  );
   return persistImageBuffer(image);
 }
 
+export async function persistGeneratedImage(dataUrl: string) {
+  return (await persistGeneratedImageWithMetadata(dataUrl)).imageUrl;
+}
+
 function imageMimeFromBuffer(buffer: Buffer) {
-  for (const mimeType of Object.keys(IMAGE_TYPES) as Array<keyof typeof IMAGE_TYPES>) {
+  for (const mimeType of Object.keys(IMAGE_TYPES) as Array<
+    keyof typeof IMAGE_TYPES
+  >) {
     if (hasExpectedSignature(buffer, mimeType)) return mimeType;
   }
   return undefined;
 }
 
-async function persistImageBuffer(
-  image: Buffer
-) {
+function pngDimensions(buffer: Buffer) {
+  if (
+    buffer.length < 24 ||
+    !hasExpectedSignature(buffer, "image/png") ||
+    buffer.readUInt32BE(8) !== 13 ||
+    buffer.subarray(12, 16).toString("ascii") !== "IHDR"
+  ) {
+    return undefined;
+  }
+
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  if (width < 1 || height < 1 || width > 0x7fffffff || height > 0x7fffffff) {
+    return undefined;
+  }
+  return { width, height };
+}
+
+async function persistImageBuffer(image: Buffer): Promise<GenerateResult> {
   if (image.length === 0) throw new Error("上游返回了空图片");
   if (image.length > MAX_GENERATED_IMAGE_BYTES) {
     throw new Error("上游返回的图片超过 20 MB");
@@ -164,7 +215,10 @@ async function persistImageBuffer(
   await mkdir(outputDir, { recursive: true });
   const filename = `${randomUUID()}.${IMAGE_TYPES[detectedMimeType]}`;
   await writeFile(path.join(outputDir, filename), image);
-  return `/generated/${filename}`;
+  return {
+    imageUrl: `/generated/${filename}`,
+    ...(detectedMimeType === "image/png" ? pngDimensions(image) : undefined),
+  };
 }
 
 async function readResponseBody(response: Response, maxBytes: number) {
@@ -200,7 +254,10 @@ async function readResponseBody(response: Response, maxBytes: number) {
  * 将上游返回的远程图片下载到本地持久目录，避免签名 URL 过期后历史记录裂图。
  */
 function isPrivateHostname(hostname: string) {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
   if (
     host === "localhost" ||
     host.endsWith(".localhost") ||
@@ -213,7 +270,10 @@ function isPrivateHostname(hostname: string) {
   }
 
   const octets = host.split(".").map(part => Number(part));
-  if (octets.length === 4 && octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255)) {
+  if (
+    octets.length === 4 &&
+    octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255)
+  ) {
     const [a, b] = octets;
     return (
       a === 0 ||
@@ -231,10 +291,10 @@ function isPrivateHostname(hostname: string) {
   return /^(?:fc|fd)[0-9a-f]{2}:|^fe[89ab][0-9a-f]{2}:/i.test(host);
 }
 
-export async function persistGeneratedImageUrl(
+async function persistGeneratedImageUrlWithMetadata(
   imageUrl: string,
   options: { authorization?: string; authorizationOrigin?: string } = {}
-) {
+): Promise<GenerateResult> {
   let parsed: URL;
   try {
     parsed = new URL(imageUrl);
@@ -249,7 +309,10 @@ export async function persistGeneratedImageUrl(
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GENERATED_IMAGE_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(
+    () => controller.abort(),
+    GENERATED_IMAGE_FETCH_TIMEOUT_MS
+  );
   try {
     let current = parsed;
     let response: Response | undefined;
@@ -260,7 +323,8 @@ export async function persistGeneratedImageUrl(
       const headers: Record<string, string> = {};
       if (
         options.authorization &&
-        (!options.authorizationOrigin || current.origin === options.authorizationOrigin)
+        (!options.authorizationOrigin ||
+          current.origin === options.authorizationOrigin)
       ) {
         headers.Authorization = options.authorization;
       }
@@ -286,7 +350,10 @@ export async function persistGeneratedImageUrl(
       response.headers.get("content-length") ?? "",
       10
     );
-    if (Number.isFinite(contentLength) && contentLength > MAX_GENERATED_IMAGE_BYTES) {
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > MAX_GENERATED_IMAGE_BYTES
+    ) {
       throw new Error("上游返回的图片超过 20 MB");
     }
     const image = await readResponseBody(response, MAX_GENERATED_IMAGE_BYTES);
@@ -303,7 +370,17 @@ export async function persistGeneratedImageUrl(
   }
 }
 
-export async function removeStoredGeneratedImage(imageUrl: string | null | undefined) {
+export async function persistGeneratedImageUrl(
+  imageUrl: string,
+  options: { authorization?: string; authorizationOrigin?: string } = {}
+) {
+  return (await persistGeneratedImageUrlWithMetadata(imageUrl, options))
+    .imageUrl;
+}
+
+export async function removeStoredGeneratedImage(
+  imageUrl: string | null | undefined
+) {
   if (!imageUrl?.startsWith("/generated/")) return;
   const { unlink } = await import("node:fs/promises");
   const outputDir = path.resolve(
@@ -315,10 +392,17 @@ export async function removeStoredGeneratedImage(imageUrl: string | null | undef
 }
 
 function shouldTryAnotherUpstream(error: unknown) {
-  if (classifyGenerationFailure(error).kind === "content_rejected") return false;
+  if (classifyGenerationFailure(error).kind === "content_rejected")
+    return false;
   if (error instanceof UpstreamImageError) {
-    return error.status === 401 || error.status === 403 || error.status === 408 ||
-      error.status === 409 || error.status === 429 || error.status >= 500;
+    return (
+      error.status === 401 ||
+      error.status === 403 ||
+      error.status === 408 ||
+      error.status === 409 ||
+      error.status === 429 ||
+      error.status >= 500
+    );
   }
   return (
     error instanceof Error &&
@@ -345,7 +429,8 @@ export async function callUpstreamWithFallback(
       if (!shouldTryAnotherUpstream(error)) throw error;
       console.warn("[image] upstream attempt failed, trying next", {
         upstreamId: upstream.id,
-        error: error instanceof Error ? error.message.slice(0, 240) : String(error),
+        error:
+          error instanceof Error ? error.message.slice(0, 240) : String(error),
       });
     }
   }
@@ -456,30 +541,24 @@ export async function callUpstream(
     const first = data.data?.[0];
     if (first?.url) {
       const returnedUrl = first.url.trim();
-      let imageUrl = returnedUrl;
       if (/^data:/i.test(returnedUrl)) {
-        imageUrl = await persistGeneratedImage(returnedUrl);
-      } else if (/^https?:\/\//i.test(returnedUrl)) {
+        return persistGeneratedImageWithMetadata(returnedUrl);
+      }
+      if (/^https?:\/\//i.test(returnedUrl)) {
         const upstreamOrigin = new URL(base).origin;
-        imageUrl = await persistGeneratedImageUrl(returnedUrl, {
+        return persistGeneratedImageUrlWithMetadata(returnedUrl, {
           authorization: upstream.apiKey
             ? `Bearer ${upstream.apiKey}`
             : undefined,
           authorizationOrigin: upstreamOrigin,
         });
-      } else {
-        throw new Error("上游返回了不支持的图片地址");
       }
-      return {
-        imageUrl,
-      };
+      throw new Error("上游返回了不支持的图片地址");
     }
     if (first?.b64_json) {
-      return {
-        imageUrl: await persistGeneratedImage(
-          `data:image/png;base64,${first.b64_json}`
-        ),
-      };
+      return persistGeneratedImageWithMetadata(
+        `data:image/png;base64,${first.b64_json}`
+      );
     }
     throw new Error("上游未返回图片");
   } finally {

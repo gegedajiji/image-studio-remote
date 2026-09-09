@@ -19,6 +19,7 @@ import {
   decodeReferenceImageDataUrl,
   MAX_REFERENCE_IMAGE_DATA_URL_LENGTH,
   removeStoredGeneratedImage,
+  resolveGeneratedImageDimensions,
 } from "./imageService";
 import {
   classifyGenerationFailure,
@@ -74,7 +75,8 @@ async function reserveGeneration(
       .from(users)
       .where(eq(users.id, userId))
       .for("update");
-    if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
+    if (!user)
+      throw new TRPCError({ code: "NOT_FOUND", message: "用户不存在" });
     // Re-check the status after taking the row lock. An administrator can ban
     // an account between the middleware check and this reservation; the
     // locked row must be authoritative so a banned account cannot still
@@ -228,9 +230,18 @@ export const generationRouter = createRouter({
           referenceImage,
         });
         generatedImageUrl = result.imageUrl;
+        const actualDimensions = resolveGeneratedImageDimensions(
+          result,
+          pricing.width,
+          pricing.height
+        );
         const [updateResult] = await db
           .update(generations)
-          .set({ status: "success", imageUrl: result.imageUrl })
+          .set({
+            status: "success",
+            imageUrl: result.imageUrl,
+            ...actualDimensions,
+          })
           .where(eq(generations.id, id));
         if (updateResult.affectedRows !== 1) {
           throw new Error("生成记录更新失败");
@@ -258,7 +269,8 @@ export const generationRouter = createRouter({
                 : String(statusError),
           });
         }
-        if (generatedImageUrl) await removeStoredGeneratedImage(generatedImageUrl);
+        if (generatedImageUrl)
+          await removeStoredGeneratedImage(generatedImageUrl);
         // 失败退款
         let refunded = true;
         try {
@@ -379,29 +391,35 @@ export const generationRouter = createRouter({
           );
         const nodeIds = nodeRows.map(node => node.id);
         if (nodeIds.length) {
-          await tx.delete(canvasEdges).where(
-            and(
-              eq(canvasEdges.userId, ctx.user.id),
-              or(inArray(canvasEdges.fromId, nodeIds), inArray(canvasEdges.toId, nodeIds))
-            )
-          );
-          await tx.delete(canvasNodes).where(
-            and(
-              eq(canvasNodes.userId, ctx.user.id),
-              inArray(canvasNodes.id, nodeIds)
-            )
-          );
+          await tx
+            .delete(canvasEdges)
+            .where(
+              and(
+                eq(canvasEdges.userId, ctx.user.id),
+                or(
+                  inArray(canvasEdges.fromId, nodeIds),
+                  inArray(canvasEdges.toId, nodeIds)
+                )
+              )
+            );
+          await tx
+            .delete(canvasNodes)
+            .where(
+              and(
+                eq(canvasNodes.userId, ctx.user.id),
+                inArray(canvasNodes.id, nodeIds)
+              )
+            );
         }
-        await tx
-          .delete(comments)
-          .where(eq(comments.generationId, input.id));
-        await tx
-          .delete(likes)
-          .where(eq(likes.generationId, input.id));
+        await tx.delete(comments).where(eq(comments.generationId, input.id));
+        await tx.delete(likes).where(eq(likes.generationId, input.id));
         await tx
           .delete(generations)
           .where(
-            and(eq(generations.id, input.id), eq(generations.userId, ctx.user.id))
+            and(
+              eq(generations.id, input.id),
+              eq(generations.userId, ctx.user.id)
+            )
           );
       });
       await removeStoredGeneratedImage(record.imageUrl);
@@ -593,7 +611,11 @@ export const communityRouter = createRouter({
           .from(generations)
           .where(eq(generations.id, input.generationId))
           .for("update");
-        if (!generation || !generation.isPublic || generation.status !== "success") {
+        if (
+          !generation ||
+          !generation.isPublic ||
+          generation.status !== "success"
+        ) {
           throw new TRPCError({ code: "NOT_FOUND", message: "作品不存在" });
         }
 
@@ -608,12 +630,14 @@ export const communityRouter = createRouter({
           )
           .for("update");
         if (existing.length) {
-          await tx.delete(likes).where(
-            and(
-              eq(likes.userId, ctx.user.id),
-              eq(likes.generationId, input.generationId)
-            )
-          );
+          await tx
+            .delete(likes)
+            .where(
+              and(
+                eq(likes.userId, ctx.user.id),
+                eq(likes.generationId, input.generationId)
+              )
+            );
           return { liked: false };
         }
         await tx

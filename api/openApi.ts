@@ -14,6 +14,7 @@ import { getDb } from "./queries/connection";
 import {
   callUpstreamWithFallback,
   removeStoredGeneratedImage,
+  resolveGeneratedImageDimensions,
 } from "./imageService";
 import {
   classifyGenerationFailure,
@@ -31,15 +32,27 @@ const imageGenerationInputSchema = z.object({
   prompt: z.string().trim().min(1, "prompt 为必填参数").max(2000),
   negative_prompt: z.string().trim().max(2000).optional(),
   model: z.string().trim().min(1).max(255).optional(),
-  size: z.string().regex(/^\d{2,4}x\d{2,4}$/, "size 必须是 WxH 格式").optional(),
+  size: z
+    .string()
+    .regex(/^\d{2,4}x\d{2,4}$/, "size 必须是 WxH 格式")
+    .optional(),
 });
 
-function absoluteImageUrl(c: { req: { url: string; header(name: string): string | undefined } }, imageUrl: string) {
+function absoluteImageUrl(
+  c: { req: { url: string; header(name: string): string | undefined } },
+  imageUrl: string
+) {
   if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
   try {
     const requestUrl = new URL(c.req.url);
-    const forwardedProto = c.req.header("x-forwarded-proto")?.split(",", 1)[0]?.trim();
-    const forwardedHost = c.req.header("x-forwarded-host")?.split(",", 1)[0]?.trim();
+    const forwardedProto = c.req
+      .header("x-forwarded-proto")
+      ?.split(",", 1)[0]
+      ?.trim();
+    const forwardedHost = c.req
+      .header("x-forwarded-host")
+      ?.split(",", 1)[0]
+      ?.trim();
     const origin = forwardedHost
       ? `${forwardedProto === "https" ? "https" : "http"}://${forwardedHost}`
       : requestUrl.origin;
@@ -76,8 +89,8 @@ async function authByApiKey(req: Request) {
     .where(
       and(
         eq(legacyApiKeys.keyHash, keyHash),
-        eq(legacyApiKeys.status, "active"),
-      ),
+        eq(legacyApiKeys.status, "active")
+      )
     );
   if (!legacyKey) return null;
 
@@ -92,17 +105,22 @@ async function authByApiKey(req: Request) {
   return legacyUser ?? null;
 }
 
-openApi.post("/images/generations", async (c) => {
+openApi.post("/images/generations", async c => {
   const user = await authByApiKey(c.req.raw);
   if (!user) return c.json({ error: { message: "无效的 API Key" } }, 401);
-  if (user.status === "banned") return c.json({ error: { message: "账号已被禁用" } }, 403);
+  if (user.status === "banned")
+    return c.json({ error: { message: "账号已被禁用" } }, 403);
 
   const parsedBody = imageGenerationInputSchema.safeParse(
     await c.req.json().catch(() => null)
   );
   if (!parsedBody.success) {
     return c.json(
-      { error: { message: parsedBody.error.issues[0]?.message ?? "请求参数无效" } },
+      {
+        error: {
+          message: parsedBody.error.issues[0]?.message ?? "请求参数无效",
+        },
+      },
       400
     );
   }
@@ -134,7 +152,8 @@ openApi.post("/images/generations", async (c) => {
     .from(upstreams)
     .where(and(eq(upstreams.enabled, true), eq(upstreams.model, pricing.model)))
     .orderBy(desc(upstreams.priority));
-  if (!upstreamList.length) return c.json({ error: { message: "暂无可用上游" } }, 503);
+  if (!upstreamList.length)
+    return c.json({ error: { message: "暂无可用上游" } }, 503);
 
   // 锁定用户、扣费和创建 pending 记录在同一事务中，避免并发超扣或插入失败漏扣。
   let id: number;
@@ -193,9 +212,18 @@ openApi.post("/images/generations", async (c) => {
       width: pricing.width,
       height: pricing.height,
     });
+    const actualDimensions = resolveGeneratedImageDimensions(
+      result,
+      pricing.width,
+      pricing.height
+    );
     const [updateResult] = await db
       .update(generations)
-      .set({ status: "success", imageUrl: result.imageUrl })
+      .set({
+        status: "success",
+        imageUrl: result.imageUrl,
+        ...actualDimensions,
+      })
       .where(eq(generations.id, id));
     if (updateResult.affectedRows !== 1) {
       await removeStoredGeneratedImage(result.imageUrl);
@@ -204,7 +232,7 @@ openApi.post("/images/generations", async (c) => {
     return c.json({
       id,
       model: pricing.model,
-      size: `${pricing.width}x${pricing.height}`,
+      size: `${actualDimensions.width}x${actualDimensions.height}`,
       cost: pricing.price,
       data: [{ url: absoluteImageUrl(c, result.imageUrl) }],
     });
@@ -242,7 +270,10 @@ openApi.post("/images/generations", async (c) => {
           .for("update");
         if (!u) throw new Error("用户不存在");
         const next = u.quota + pricing.price;
-        await tx.update(users).set({ quota: next }).where(eq(users.id, user.id));
+        await tx
+          .update(users)
+          .set({ quota: next })
+          .where(eq(users.id, user.id));
         await tx.insert(creditLogs).values({
           userId: user.id,
           amount: pricing.price,

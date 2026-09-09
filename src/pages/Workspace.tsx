@@ -193,13 +193,21 @@ export default function Workspace() {
   );
   const profileQuery = trpc.user.profile.useQuery(undefined, { enabled: isAuthenticated });
 
-  const navigationPricing = pricingQuery.data?.find(
-    pricing =>
-      typeof (navigationState?.model ?? storedWorkspaceState?.model) === "string" &&
-      pricing.model === (navigationState?.model ?? storedWorkspaceState?.model) &&
-      pricing.width === (navigationState?.width ?? storedWorkspaceState?.width) &&
-      pricing.height === (navigationState?.height ?? storedWorkspaceState?.height),
-  );
+  const navigationModel = navigationState?.model ?? storedWorkspaceState?.model;
+  const navigationWidth = navigationState?.width ?? storedWorkspaceState?.width;
+  const navigationHeight = navigationState?.height ?? storedWorkspaceState?.height;
+  const navigationPricing =
+    pricingQuery.data?.find(
+      pricing =>
+        typeof navigationModel === "string" &&
+        pricing.model === navigationModel &&
+        pricing.width === navigationWidth &&
+        pricing.height === navigationHeight,
+    ) ??
+    pricingQuery.data?.find(
+      pricing =>
+        typeof navigationModel === "string" && pricing.model === navigationModel,
+    );
   const selected =
     pricingQuery.data?.find((p) => p.id === pricingId) ??
     navigationPricing ??
