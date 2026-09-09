@@ -17,7 +17,9 @@ const models = [
   },
 ];
 
-const size = { name: "标准", width: 1536, height: 1024 };
+// The 2.5 upstream chooses the final aspect ratio from the prompt while
+// keeping roughly 1.5 MP. These dimensions are the stable request baseline.
+const size = { name: "自适应画幅（请求基准）", width: 1536, height: 1024 };
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
