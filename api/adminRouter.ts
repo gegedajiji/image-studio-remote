@@ -12,6 +12,9 @@ import {
 import { createRouter, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { randomBytes } from "crypto";
+import { isImage25Model } from "./generationSize";
+
+const IMAGE_25_BASELINE = { width: 1536, height: 1024 } as const;
 
 function makeCardCode() {
   // 16 位卡密，4-4-4-4 分组，去掉易混淆字符
@@ -260,77 +263,167 @@ export const adminRouter = createRouter({
   // ===== 生图价格 =====
   pricing: createRouter({
     list: adminQuery.query(async () => {
-      return getDb().select().from(modelPricing).orderBy(modelPricing.model, modelPricing.price);
+      return getDb()
+        .select()
+        .from(modelPricing)
+        .orderBy(modelPricing.model, modelPricing.price);
     }),
     create: adminQuery
       .input(
         z.object({
-          model: z.string().min(1).max(255),
-          label: z.string().min(1).max(255),
+          model: z.string().trim().min(1).max(255),
+          label: z.string().trim().min(1).max(255),
           width: z.number().int().min(64).max(4096),
           height: z.number().int().min(64).max(4096),
           price: z.number().int().min(0),
-        }),
+        })
       )
       .mutation(async ({ input }) => {
         const db = getDb();
+        if (
+          isImage25Model(input.model) &&
+          (input.width !== IMAGE_25_BASELINE.width ||
+            input.height !== IMAGE_25_BASELINE.height)
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Image 2.5 使用模型统一价格，不能新增独立尺寸价格项",
+          });
+        }
         const [duplicate] = await db
           .select({ id: modelPricing.id })
           .from(modelPricing)
           .where(
-            and(
-              eq(modelPricing.model, input.model),
-              eq(modelPricing.width, input.width),
-              eq(modelPricing.height, input.height)
-            )
+            isImage25Model(input.model)
+              ? eq(modelPricing.model, input.model)
+              : and(
+                  eq(modelPricing.model, input.model),
+                  eq(modelPricing.width, input.width),
+                  eq(modelPricing.height, input.height)
+                )
           )
           .limit(1);
         if (duplicate) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "该模型与尺寸已存在",
+            message: isImage25Model(input.model)
+              ? "该 Image 2.5 模型已存在统一价格项"
+              : "该模型与尺寸已存在",
           });
         }
         await db.insert(modelPricing).values(input);
         return { ok: true };
       }),
+    updatePrice: adminQuery
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          price: z.number().int().min(0),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const db = getDb();
+        const [target] = await db
+          .select({ id: modelPricing.id })
+          .from(modelPricing)
+          .where(eq(modelPricing.id, input.id))
+          .limit(1);
+        if (!target) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "价格配置不存在",
+          });
+        }
+        await db
+          .update(modelPricing)
+          .set({ price: input.price })
+          .where(eq(modelPricing.id, input.id));
+        return { ok: true };
+      }),
+    updateEnabled: adminQuery
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+          enabled: z.boolean(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const db = getDb();
+        const [target] = await db
+          .select({ id: modelPricing.id })
+          .from(modelPricing)
+          .where(eq(modelPricing.id, input.id))
+          .limit(1);
+        if (!target) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "价格配置不存在",
+          });
+        }
+        await db
+          .update(modelPricing)
+          .set({ enabled: input.enabled })
+          .where(eq(modelPricing.id, input.id));
+        return { ok: true };
+      }),
     update: adminQuery
       .input(
         z.object({
-          id: z.number(),
-          label: z.string().min(1).max(255),
+          id: z.number().int().positive(),
+          label: z.string().trim().min(1).max(255),
           width: z.number().int().min(64).max(4096),
           height: z.number().int().min(64).max(4096),
           price: z.number().int().min(0),
           enabled: z.boolean(),
-        }),
+        })
       )
       .mutation(async ({ input }) => {
         const db = getDb();
         const [current] = await db
-          .select({ model: modelPricing.model })
+          .select({
+            model: modelPricing.model,
+            width: modelPricing.width,
+            height: modelPricing.height,
+          })
           .from(modelPricing)
           .where(eq(modelPricing.id, input.id))
           .limit(1);
         if (!current) {
           throw new TRPCError({ code: "NOT_FOUND", message: "价格配置不存在" });
         }
+        if (
+          isImage25Model(current.model) &&
+          (input.width !== IMAGE_25_BASELINE.width ||
+            input.height !== IMAGE_25_BASELINE.height)
+        ) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Image 2.5 使用模型统一价格，内部基准尺寸不能修改",
+          });
+        }
         const [duplicate] = await db
           .select({ id: modelPricing.id })
           .from(modelPricing)
           .where(
-            and(
-              eq(modelPricing.model, current.model),
-              eq(modelPricing.width, input.width),
-              eq(modelPricing.height, input.height),
-              ne(modelPricing.id, input.id)
-            )
+            isImage25Model(current.model)
+              ? and(
+                  eq(modelPricing.model, current.model),
+                  ne(modelPricing.id, input.id)
+                )
+              : and(
+                  eq(modelPricing.model, current.model),
+                  eq(modelPricing.width, input.width),
+                  eq(modelPricing.height, input.height),
+                  ne(modelPricing.id, input.id)
+                )
           )
           .limit(1);
         if (duplicate) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "该模型与尺寸已存在",
+            message: isImage25Model(current.model)
+              ? "该 Image 2.5 模型存在重复价格项，请先清理重复配置"
+              : "该模型与尺寸已存在",
           });
         }
         await db
@@ -345,10 +438,12 @@ export const adminRouter = createRouter({
           .where(eq(modelPricing.id, input.id));
         return { ok: true };
       }),
-    remove: adminQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
-      await getDb().delete(modelPricing).where(eq(modelPricing.id, input.id));
-      return { ok: true };
-    }),
+    remove: adminQuery
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ input }) => {
+        await getDb().delete(modelPricing).where(eq(modelPricing.id, input.id));
+        return { ok: true };
+      }),
   }),
 
   // ===== 卡密管理 =====
