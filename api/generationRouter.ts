@@ -26,6 +26,11 @@ import {
   getRawGenerationError,
   refundedGenerationMessage,
 } from "./generationError";
+import {
+  IMAGE_2_SIZE_SOURCE_MODEL,
+  isImage25Model,
+  resolveGenerationDimensions,
+} from "./generationSize";
 
 async function deductQuota(
   userId: number,
@@ -137,6 +142,8 @@ export const generationRouter = createRouter({
         prompt: z.string().trim().min(1, "请输入提示词").max(2000),
         negativePrompt: z.string().trim().max(2000).optional(),
         pricingId: z.number().int().positive(),
+        width: z.number().optional(),
+        height: z.number().optional(),
         referenceImageDataUrl: z
           .string()
           .max(MAX_REFERENCE_IMAGE_DATA_URL_LENGTH, "参考图数据不能超过 14 MB")
@@ -191,6 +198,29 @@ export const generationRouter = createRouter({
         });
       }
 
+      const enabledImage2Sizes = await db
+        .select({ width: modelPricing.width, height: modelPricing.height })
+        .from(modelPricing)
+        .where(
+          and(
+            eq(modelPricing.model, IMAGE_2_SIZE_SOURCE_MODEL),
+            eq(modelPricing.enabled, true)
+          )
+        );
+      let requestedDimensions: { width: number; height: number };
+      try {
+        requestedDimensions = resolveGenerationDimensions(
+          pricing,
+          { width: input.width, height: input.height },
+          enabledImage2Sizes
+        );
+      } catch (error) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: error instanceof Error ? error.message : "所选尺寸不可用",
+        });
+      }
+
       // 查找可用上游（按优先级）
       const upstreamList = await db
         .select()
@@ -208,15 +238,18 @@ export const generationRouter = createRouter({
       }
 
       const generationType = referenceImage ? "图生图" : "生图";
+      const generationLabel = isImage25Model(pricing.model)
+        ? `${pricing.label.split(" · ", 1)[0]} · ${requestedDimensions.width}×${requestedDimensions.height}`
+        : pricing.label;
       // 锁定用户、扣费和创建 pending 记录在同一事务中完成，避免并发超扣或插入失败漏扣。
       const id = await reserveGeneration(ctx.user.id, {
         prompt: input.prompt,
         negativePrompt: input.negativePrompt,
         model: pricing.model,
-        width: pricing.width,
-        height: pricing.height,
+        width: requestedDimensions.width,
+        height: requestedDimensions.height,
         cost: pricing.price,
-        label: pricing.label,
+        label: generationLabel,
         generationType,
       });
 
@@ -225,15 +258,15 @@ export const generationRouter = createRouter({
         const { result } = await callUpstreamWithFallback(upstreamList, {
           prompt: input.prompt,
           negativePrompt: input.negativePrompt,
-          width: pricing.width,
-          height: pricing.height,
+          width: requestedDimensions.width,
+          height: requestedDimensions.height,
           referenceImage,
         });
         generatedImageUrl = result.imageUrl;
         const actualDimensions = resolveGeneratedImageDimensions(
           result,
-          pricing.width,
-          pricing.height
+          requestedDimensions.width,
+          requestedDimensions.height
         );
         const [updateResult] = await db
           .update(generations)
@@ -278,7 +311,7 @@ export const generationRouter = createRouter({
             ctx.user.id,
             pricing.price,
             "refund",
-            `${generationType}失败退款·${pricing.label}`
+            `${generationType}失败退款·${generationLabel}`
           );
         } catch (refundError) {
           refunded = false;

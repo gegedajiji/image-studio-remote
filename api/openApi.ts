@@ -21,6 +21,11 @@ import {
   getRawGenerationError,
   refundedGenerationMessage,
 } from "./generationError";
+import {
+  IMAGE_2_SIZE_SOURCE_MODEL,
+  isImage25Model,
+  resolveGenerationDimensions,
+} from "./generationSize";
 
 /**
  * 开放 API（REST）：/api/v1/*
@@ -137,12 +142,10 @@ openApi.post("/images/generations", async c => {
     : [];
   const pricing =
     body.model && body.size
-      ? requestedModelPricings.find(
+      ? (requestedModelPricings.find(
           p => `${p.width}x${p.height}` === body.size
         ) ??
-        (body.model.startsWith("gpt-image-2.5-")
-          ? requestedModelPricings[0]
-          : undefined)
+        (isImage25Model(body.model) ? requestedModelPricings[0] : undefined))
       : body.model
         ? requestedModelPricings[0]
         : body.size
@@ -152,6 +155,32 @@ openApi.post("/images/generations", async c => {
   if (!isUsablePricing(pricing)) {
     return c.json({ error: { message: "服务暂不可用" } }, 503);
   }
+
+  const [requestedWidth, requestedHeight] = body.size
+    ? body.size.split("x").map(Number)
+    : [undefined, undefined];
+  let requestedDimensions: { width: number; height: number };
+  try {
+    requestedDimensions = resolveGenerationDimensions(
+      pricing,
+      { width: requestedWidth, height: requestedHeight },
+      pricings
+        .filter(item => item.model === IMAGE_2_SIZE_SOURCE_MODEL)
+        .map(item => ({ width: item.width, height: item.height }))
+    );
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          message: error instanceof Error ? error.message : "所选尺寸不可用",
+        },
+      },
+      400
+    );
+  }
+  const generationLabel = isImage25Model(pricing.model)
+    ? `${pricing.label.split(" · ", 1)[0]} · ${requestedDimensions.width}×${requestedDimensions.height}`
+    : pricing.label;
 
   const upstreamList = await db
     .select()
@@ -184,7 +213,7 @@ openApi.post("/images/generations", async c => {
         amount: -pricing.price,
         balanceAfter: next,
         type: "generate",
-        remark: `API 生图·${pricing.label}`,
+        remark: `API 生图·${generationLabel}`,
       });
       const [{ id: generationId }] = await tx
         .insert(generations)
@@ -193,8 +222,8 @@ openApi.post("/images/generations", async c => {
           prompt: body.prompt,
           negativePrompt: body.negative_prompt ?? null,
           model: pricing.model,
-          width: pricing.width,
-          height: pricing.height,
+          width: requestedDimensions.width,
+          height: requestedDimensions.height,
           cost: pricing.price,
           status: "pending",
         })
@@ -215,13 +244,13 @@ openApi.post("/images/generations", async c => {
     const { result } = await callUpstreamWithFallback(upstreamList, {
       prompt: body.prompt,
       negativePrompt: body.negative_prompt,
-      width: pricing.width,
-      height: pricing.height,
+      width: requestedDimensions.width,
+      height: requestedDimensions.height,
     });
     const actualDimensions = resolveGeneratedImageDimensions(
       result,
-      pricing.width,
-      pricing.height
+      requestedDimensions.width,
+      requestedDimensions.height
     );
     const [updateResult] = await db
       .update(generations)

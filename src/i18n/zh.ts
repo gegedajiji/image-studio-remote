@@ -98,6 +98,8 @@ export const zh = {
     negative: "反向提示词 · NEGATIVE",
     negativePlaceholder: "不希望出现的元素，例如：模糊、变形、水印…",
     model: "模型与尺寸 · MODEL",
+    modelChoice: "模型",
+    resolutionChoice: "分辨率",
     credits: "积分",
     generate: "生成图像",
     generating: "能量凝聚中…",

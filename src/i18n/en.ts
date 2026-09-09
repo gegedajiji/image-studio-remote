@@ -48,8 +48,7 @@ export const en: Dict = {
     startGenerate: "Generate",
     loadingPricing: "Loading pricing…",
     ctaFinalTitle: "Ready to unleash your imagination?",
-    ctaFinalSub:
-      "Card-key top-ups anytime, pay as you go, instant API access",
+    ctaFinalSub: "Card-key top-ups anytime, pay as you go, instant API access",
     ctaFinalBtn: "Create an Account",
     f1t: "Multi-Model Generation",
     f1d: "Multiple sizes and style models; admins can plug in any OpenAI-compatible upstream.",
@@ -101,11 +100,14 @@ export const en: Dict = {
     invalidReferenceType: "Reference image must be PNG, JPEG or WebP",
     referenceTooLarge: "Reference image must be 10 MB or smaller",
     referenceTooSmall: "Reference image must be at least 64 × 64",
-    referenceReadFailed: "Could not read the reference image. Try another file.",
+    referenceReadFailed:
+      "Could not read the reference image. Try another file.",
     negative: "NEGATIVE PROMPT",
     negativePlaceholder:
       "Elements to avoid, e.g.: blur, distortion, watermark…",
     model: "MODEL & SIZE",
+    modelChoice: "Model",
+    resolutionChoice: "Resolution",
     credits: "credits",
     generate: "Generate",
     generating: "Converging…",
