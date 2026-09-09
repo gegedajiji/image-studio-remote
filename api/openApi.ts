@@ -132,13 +132,19 @@ openApi.post("/images/generations", async c => {
     .select()
     .from(modelPricing)
     .where(eq(modelPricing.enabled, true));
+  const requestedModelPricings = body.model
+    ? pricings.filter(p => p.model === body.model)
+    : [];
   const pricing =
     body.model && body.size
-      ? pricings.find(
-          p => p.model === body.model && `${p.width}x${p.height}` === body.size
-        )
+      ? requestedModelPricings.find(
+          p => `${p.width}x${p.height}` === body.size
+        ) ??
+        (body.model.startsWith("gpt-image-2.5-")
+          ? requestedModelPricings[0]
+          : undefined)
       : body.model
-        ? pricings.find(p => p.model === body.model)
+        ? requestedModelPricings[0]
         : body.size
           ? pricings.find(p => `${p.width}x${p.height}` === body.size)
           : pricings[0];
