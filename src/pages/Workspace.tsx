@@ -240,6 +240,9 @@ export default function Workspace() {
     navigationPricing ??
     defaultPricing;
   const modelOptions = buildModelOptions(pricingQuery.data ?? []);
+  const selectedModelLabel =
+    modelOptions.find(option => option.model === selected?.model)?.label ??
+    selected?.model;
   const resolutionOptions = getResolutionOptions(
     pricingQuery.data ?? [],
     selected?.model ?? ""
@@ -750,9 +753,9 @@ export default function Workspace() {
                   <label className="mt-3 block text-xs font-medium text-sky-600 tracking-widest uppercase">
                     {t("workspace.model")}
                   </label>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
                     <div className="min-w-0">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">
+                      <span className="mb-1.5 block text-xs font-medium uppercase tracking-widest text-sky-600">
                         {t("workspace.modelChoice")}
                       </span>
                       <Select
@@ -761,15 +764,23 @@ export default function Workspace() {
                       >
                         <SelectTrigger
                           aria-label={t("workspace.modelChoice")}
-                          className="h-11 w-full rounded-xl border-slate-300 bg-white/75 px-3 text-slate-700 shadow-[inset_0_0_16px_rgba(56,189,248,0.05)] focus-visible:border-sky-400 focus-visible:ring-sky-200"
+                          title={selectedModelLabel}
+                          className="workspace-select-trigger holo-input"
                         >
                           <SelectValue
                             placeholder={t("workspace.modelChoice")}
-                          />
+                            className="min-w-0 flex-1 truncate text-left"
+                          >
+                            {selectedModelLabel?.replace(/^GPT\s+/i, "")}
+                          </SelectValue>
                         </SelectTrigger>
-                        <SelectContent className="border-slate-200 bg-white/95 text-slate-700 backdrop-blur-xl">
+                        <SelectContent className="workspace-select-content holo-panel z-[70]">
                           {modelOptions.map(option => (
-                            <SelectItem key={option.model} value={option.model}>
+                            <SelectItem
+                              key={option.model}
+                              value={option.model}
+                              className="workspace-select-item"
+                            >
                               {option.label}
                             </SelectItem>
                           ))}
@@ -778,7 +789,7 @@ export default function Workspace() {
                     </div>
 
                     <div className="min-w-0">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">
+                      <span className="mb-1.5 block text-xs font-medium uppercase tracking-widest text-sky-600">
                         {t("workspace.resolutionChoice")}
                       </span>
                       <Select
@@ -791,13 +802,19 @@ export default function Workspace() {
                       >
                         <SelectTrigger
                           aria-label={t("workspace.resolutionChoice")}
-                          className="h-11 w-full rounded-xl border-slate-300 bg-white/75 px-3 font-mono text-slate-700 shadow-[inset_0_0_16px_rgba(56,189,248,0.05)] focus-visible:border-sky-400 focus-visible:ring-sky-200"
+                          title={
+                            selectedResolution
+                              ? `${selectedResolution.width}×${selectedResolution.height}`
+                              : undefined
+                          }
+                          className="workspace-select-trigger holo-input tabular-nums"
                         >
                           <SelectValue
                             placeholder={t("workspace.resolutionChoice")}
+                            className="min-w-0 flex-1 truncate text-left"
                           />
                         </SelectTrigger>
-                        <SelectContent className="border-slate-200 bg-white/95 text-slate-700 backdrop-blur-xl">
+                        <SelectContent className="workspace-select-content holo-panel z-[70]">
                           {resolutionOptions.map(resolution => {
                             const label = resolution.label.includes(" · ")
                               ? resolution.label
@@ -809,6 +826,7 @@ export default function Workspace() {
                               <SelectItem
                                 key={`${resolution.width}x${resolution.height}`}
                                 value={`${resolution.width}x${resolution.height}`}
+                                className="workspace-select-item tabular-nums"
                               >
                                 {label}
                               </SelectItem>
