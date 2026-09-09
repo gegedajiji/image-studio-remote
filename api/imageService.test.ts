@@ -35,6 +35,11 @@ const upstream: Upstream = {
   updatedAt: new Date(),
 };
 
+const image25Models = [
+  "gpt-image-2.5-flare",
+  "gpt-image-2.5-sunburst",
+] as const;
+
 const png = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   Buffer.from("reference-png"),
@@ -242,6 +247,84 @@ describe("upstream request format", () => {
     expect(image.name).toBe("reference.png");
     expect(image.type).toBe("image/png");
     expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
+  });
+
+  it.each(image25Models)(
+    "passes %s unchanged to JSON generations requests",
+    async (model) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(imageResponse());
+
+      await callUpstream({ ...upstream, model }, {
+        prompt: "a quiet lake",
+        width: 1536,
+        height: 1024,
+      });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("https://images.example.test/v1/images/generations");
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        model,
+        size: "1536x1024",
+        quality: "high",
+      });
+    },
+  );
+
+  it.each(image25Models)(
+    "passes %s unchanged to multipart edits requests",
+    async (model) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(imageResponse());
+      const referenceImage = decodeReferenceImageDataUrl(
+        dataUrl("image/png", png),
+      );
+
+      await callUpstream({ ...upstream, model }, {
+        prompt: "turn this into watercolor",
+        width: 1536,
+        height: 1024,
+        referenceImage,
+      });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("https://images.example.test/v1/images/edits");
+      expect(init?.body).toBeInstanceOf(FormData);
+      const form = init?.body as FormData;
+      expect(form.get("model")).toBe(model);
+      expect(form.get("size")).toBe("1536x1024");
+      expect(form.get("quality")).toBe("high");
+    },
+  );
+
+  it("stores a Flare data URL response and returns its generated path", async () => {
+    testDir = await mkdtemp(path.join(tmpdir(), "mirage-image-"));
+    process.env.GENERATED_IMAGE_DIR = testDir;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ data: [{ url: dataUrl("image/png", png) }] }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    const result = await callUpstream(
+      { ...upstream, model: "gpt-image-2.5-flare" },
+      {
+        prompt: "a quiet lake",
+        width: 1536,
+        height: 1024,
+      },
+    );
+
+    expect(result.imageUrl).toMatch(/^\/generated\/[a-f0-9-]+\.png$/);
+    await expect(
+      readFile(path.join(testDir, path.basename(result.imageUrl))),
+    ).resolves.toEqual(png);
   });
 
   it("falls back to the next upstream after a transient failure", async () => {
