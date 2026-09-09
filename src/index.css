@@ -482,17 +482,17 @@ body {
 }
 .workspace-select-item:focus,
 .workspace-select-item[data-highlighted] {
-  border-color: rgba(125, 211, 252, 0.68);
-  background: rgba(224, 242, 254, 0.72);
-  color: #0369a1;
+  border-color: rgba(125, 211, 252, 0.68) !important;
+  background: rgba(224, 242, 254, 0.72) !important;
+  color: #0369a1 !important;
 }
 .workspace-select-item[data-state="checked"] {
-  border-color: rgba(56, 189, 248, 0.62);
-  background: rgba(14, 165, 233, 0.1);
-  color: #0369a1;
+  border-color: rgba(56, 189, 248, 0.62) !important;
+  background: rgba(14, 165, 233, 0.1) !important;
+  color: #0369a1 !important;
 }
 .workspace-select-item [data-slot="select-item-indicator"] {
-  color: #0ea5e9;
+  color: #0ea5e9 !important;
 }
 
 /* 能量核心按钮（金色-薄荷-薰衣草旋转光环） */
