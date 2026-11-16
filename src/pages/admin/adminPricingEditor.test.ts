@@ -46,6 +46,24 @@ const rows: AdminPricingRow[] = [
     enabled: true,
   },
   {
+    id: 7,
+    model: "gpt-image-2.6-flare",
+    label: "GPT Image 2.6 Flare · 自适应画幅（请求基准） 1536×1024",
+    width: 1536,
+    height: 1024,
+    price: 15,
+    enabled: true,
+  },
+  {
+    id: 8,
+    model: "gpt-image-2.6-sunburst",
+    label: "GPT Image 2.6 Sunburst · 自适应画幅（请求基准） 1536×1024",
+    width: 1536,
+    height: 1024,
+    price: 20,
+    enabled: true,
+  },
+  {
     id: 3,
     model: "gpt-image-2",
     label: "GPT Image 2 · 竖版 1024×1536",
@@ -111,7 +129,7 @@ describe("admin pricing editor helpers", () => {
     ).toMatchObject({ enabled: true });
   });
 
-  it("uses all Image 2 sizes for Image 2.5, including disabled sizes", () => {
+  it("uses all Image 2 sizes for shared models, including disabled sizes", () => {
     expect(
       buildAdminResolutionOptions(rows, ADMIN_DEFAULT_MODEL).map(option => ({
         key: option.key,
@@ -128,6 +146,8 @@ describe("admin pricing editor helpers", () => {
   it.each([
     ["gpt-image-2.5-flare", 5, 15],
     ["gpt-image-2.5-sunburst", 6, 20],
+    ["gpt-image-2.6-flare", 7, 15],
+    ["gpt-image-2.6-sunburst", 8, 20],
   ] as const)(
     "maps every shared resolution for %s to one model price row",
     (model, id, price) => {
@@ -184,7 +204,11 @@ describe("admin pricing editor helpers", () => {
   });
 
   it("reports duplicate configurations instead of silently picking one", () => {
-    const duplicateSize = { ...rows[5], id: 10, enabled: false };
+    const image2Square = rows.find(
+      row =>
+        row.model === "gpt-image-2" && row.width === 1024 && row.height === 1024
+    )!;
+    const duplicateSize = { ...image2Square, id: 10, enabled: false };
     expect(
       buildAdminResolutionOptions([...rows, duplicateSize], "gpt-image-2").find(
         option => option.key === "1024x1024"
@@ -203,7 +227,15 @@ describe("admin pricing editor helpers", () => {
       )
     ).toMatchObject({ status: "conflict", rowIds: [1, 10] });
 
-    const duplicateModel = { ...rows[3], id: 11, width: 1024, height: 1024 };
+    const defaultModelRow = rows.find(
+      row => row.model === ADMIN_DEFAULT_MODEL
+    )!;
+    const duplicateModel = {
+      ...defaultModelRow,
+      id: 11,
+      width: 1024,
+      height: 1024,
+    };
     expect(
       resolveAdminPricingTarget(
         [...rows, duplicateModel],
@@ -211,7 +243,7 @@ describe("admin pricing editor helpers", () => {
         2048,
         2048
       )
-    ).toMatchObject({ status: "conflict", rowIds: [6, 11] });
+    ).toMatchObject({ status: "conflict", rowIds: [8, 11] });
   });
 
   it("reports missing model-size and model-level price targets", () => {
@@ -220,7 +252,7 @@ describe("admin pricing editor helpers", () => {
     ).toMatchObject({ status: "missing" });
     expect(
       resolveAdminPricingTarget(
-        rows.filter(row => row.model !== "gpt-image-2.5-sunburst"),
+        rows.filter(row => row.model !== ADMIN_DEFAULT_MODEL),
         ADMIN_DEFAULT_MODEL,
         1024,
         1024

@@ -1,11 +1,13 @@
-export const IMAGE_2_5_MODELS = [
+export const SHARED_IMAGE_MODELS = [
   "gpt-image-2.5-flare",
   "gpt-image-2.5-sunburst",
+  "gpt-image-2.6-flare",
+  "gpt-image-2.6-sunburst",
 ] as const;
 
 export const IMAGE_2_SIZE_SOURCE_MODEL = "gpt-image-2";
 
-export type Image25Model = (typeof IMAGE_2_5_MODELS)[number];
+export type SharedImageModel = (typeof SHARED_IMAGE_MODELS)[number];
 
 type PricingDimensions = Readonly<{
   model: string;
@@ -23,8 +25,8 @@ type ImageDimensions = Readonly<{
   height: number;
 }>;
 
-export function isImage25Model(model: unknown): model is Image25Model {
-  return model === "gpt-image-2.5-flare" || model === "gpt-image-2.5-sunburst";
+export function isSharedImageModel(model: unknown): model is SharedImageModel {
+  return (SHARED_IMAGE_MODELS as readonly unknown[]).includes(model);
 }
 
 function isValidDimension(value: unknown): value is number {
@@ -35,8 +37,8 @@ function isValidDimension(value: unknown): value is number {
 
 /**
  * Resolve the size sent to an image upstream without changing the pricing row.
- * Only the two exact Image 2.5 models may override their pricing baseline, and
- * only with a complete width/height pair exposed by an enabled Image 2 price.
+ * Shared image models may override their pricing baseline only with a complete
+ * width/height pair exposed by an enabled Image 2 price.
  */
 export function resolveGenerationDimensions(
   pricing: PricingDimensions,
@@ -65,7 +67,7 @@ export function resolveGenerationDimensions(
     return { width, height };
   }
 
-  if (!isImage25Model(pricing.model)) {
+  if (!isSharedImageModel(pricing.model)) {
     throw new Error("所选尺寸不可用");
   }
 

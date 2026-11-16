@@ -39,7 +39,7 @@ import {
   buildAdminModelOptions,
   buildAdminResolutionOptions,
   getAdminModelLabel,
-  isAdminImage25Model,
+  isAdminSharedImageModel,
   parseAdminPriceDraft,
   resolveAdminPricingTarget,
 } from "./adminPricingEditor";
@@ -73,7 +73,7 @@ function parseDimension(value: string) {
 }
 
 function advancedSizeLabel(pricing: ModelPricing) {
-  if (isAdminImage25Model(pricing.model)) {
+  if (isAdminSharedImageModel(pricing.model)) {
     return (
       <div>
         <div className="font-medium text-slate-600">1K / 2K / 竖版 / 4K</div>
@@ -131,7 +131,7 @@ export default function AdminPricing() {
   const pricingTarget = selectedResolution?.conflict
     ? {
         status: "conflict" as const,
-        message: isAdminImage25Model(activeEditorModel)
+        message: isAdminSharedImageModel(activeEditorModel)
           ? "该共享分辨率存在重复价格项，请在高级管理中处理"
           : "该模型与分辨率存在重复价格项，请在高级管理中处理",
         rowIds: selectedResolution.sourceRowIds,
@@ -225,13 +225,13 @@ export default function AdminPricing() {
   };
 
   const openEdit = (pricing: ModelPricing) => {
-    const image25 = isAdminImage25Model(pricing.model);
+    const sharedImage = isAdminSharedImageModel(pricing.model);
     setForm({
       id: pricing.id,
       model: pricing.model,
       label: pricing.label,
-      width: String(image25 ? 1536 : pricing.width),
-      height: String(image25 ? 1024 : pricing.height),
+      width: String(sharedImage ? 1536 : pricing.width),
+      height: String(sharedImage ? 1024 : pricing.height),
       price: String(pricing.price),
       enabled: pricing.enabled,
     });
@@ -241,9 +241,9 @@ export default function AdminPricing() {
   const submitAdvancedForm = () => {
     const model = form.model.trim();
     const label = form.label.trim();
-    const image25 = isAdminImage25Model(model);
-    const width = image25 ? 1536 : parseDimension(form.width);
-    const height = image25 ? 1024 : parseDimension(form.height);
+    const sharedImage = isAdminSharedImageModel(model);
+    const width = sharedImage ? 1536 : parseDimension(form.width);
+    const height = sharedImage ? 1024 : parseDimension(form.height);
     const price = parseAdminPriceDraft(form.price);
     if (!model || !label) {
       toast.error("请填写模型与显示名称");
@@ -273,7 +273,7 @@ export default function AdminPricing() {
 
   const advancedSaving =
     createMutation.isPending || fullUpdateMutation.isPending;
-  const isImage25 = isAdminImage25Model(activeEditorModel);
+  const isSharedImage = isAdminSharedImageModel(activeEditorModel);
 
   return (
     <div>
@@ -424,7 +424,7 @@ export default function AdminPricing() {
               {pricingTarget?.status === "ready" ? (
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-start gap-2.5 text-sm text-slate-600">
-                    {isImage25 && selectedResolution?.enabled === false ? (
+                    {isSharedImage && selectedResolution?.enabled === false ? (
                       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                     ) : (
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
@@ -434,21 +434,22 @@ export default function AdminPricing() {
                         {selectedModel?.label} · {selectedResolution?.label}
                       </p>
                       <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
-                        {isImage25
-                          ? "Image 2.5 按模型统一计价，四档分辨率共用这里设置的价格。"
+                        {isSharedImage
+                          ? "Image 2.5/2.6 按模型统一计价，四档分辨率共用这里设置的价格。"
                           : "本次只修改当前模型与当前分辨率组合的价格。"}
                       </p>
-                      {isImage25 && selectedResolution?.enabled === false && (
-                        <p className="mt-1 text-xs leading-relaxed text-amber-600">
-                          这档共享分辨率当前已停用；右侧可恢复，并会同步到 Image
-                          2、Flare 和 Sunburst。
-                        </p>
-                      )}
+                      {isSharedImage &&
+                        selectedResolution?.enabled === false && (
+                          <p className="mt-1 text-xs leading-relaxed text-amber-600">
+                            这档共享分辨率当前已停用；右侧可恢复，并会同步到
+                            Image 2、Flare 和 Sunburst。
+                          </p>
+                        )}
                     </div>
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-3 min-[420px]:flex-row min-[420px]:items-center sm:w-auto sm:flex-col sm:items-end">
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[420px]:justify-end">
-                      {isImage25 && (
+                      {isSharedImage && (
                         <label className="flex items-center gap-2 text-sm text-slate-600">
                           <Switch
                             checked={pricingTarget.row.enabled}
@@ -466,25 +467,25 @@ export default function AdminPricing() {
                       <label className="flex items-center gap-2 text-sm text-slate-600">
                         <Switch
                           checked={
-                            isImage25
+                            isSharedImage
                               ? (selectedResolution?.enabled ?? false)
                               : pricingTarget.row.enabled
                           }
                           disabled={
                             enabledMutation.isPending ||
-                            (isImage25 &&
+                            (isSharedImage &&
                               selectedResolution?.sourceRowIds.length !== 1)
                           }
                           onCheckedChange={enabled =>
                             enabledMutation.mutate({
-                              id: isImage25
+                              id: isSharedImage
                                 ? selectedResolution!.sourceRowIds[0]
                                 : pricingTarget.row.id,
                               enabled,
                             })
                           }
                         />
-                        {isImage25 ? "启用此共享分辨率" : "启用此分辨率"}
+                        {isSharedImage ? "启用此共享分辨率" : "启用此分辨率"}
                       </label>
                     </div>
                     <Button
@@ -577,7 +578,7 @@ export default function AdminPricing() {
                       className="border-b border-slate-200/60 last:border-0"
                     >
                       <td className="px-4 py-3 font-medium text-slate-700">
-                        {isAdminImage25Model(pricing.model)
+                        {isAdminSharedImageModel(pricing.model)
                           ? getAdminModelLabel(pricing.model, pricing.label)
                           : pricing.label}
                       </td>
@@ -657,7 +658,7 @@ export default function AdminPricing() {
                     setForm(current => ({
                       ...current,
                       model,
-                      ...(isAdminImage25Model(model.trim())
+                      ...(isAdminSharedImageModel(model.trim())
                         ? { width: "1536", height: "1024" }
                         : {}),
                     }));
@@ -690,7 +691,7 @@ export default function AdminPricing() {
                   type="text"
                   inputMode="numeric"
                   value={form.width}
-                  disabled={isAdminImage25Model(form.model.trim())}
+                  disabled={isAdminSharedImageModel(form.model.trim())}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -707,7 +708,7 @@ export default function AdminPricing() {
                   type="text"
                   inputMode="numeric"
                   value={form.height}
-                  disabled={isAdminImage25Model(form.model.trim())}
+                  disabled={isAdminSharedImageModel(form.model.trim())}
                   onChange={event =>
                     setForm(current => ({
                       ...current,
@@ -745,10 +746,10 @@ export default function AdminPricing() {
                 />
               </label>
             )}
-            {isAdminImage25Model(form.model.trim()) && (
+            {isAdminSharedImageModel(form.model.trim()) && (
               <div className="flex gap-2 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-sky-700">
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
-                Image 2.5 使用模型统一价；1536×1024
+                Image 2.5/2.6 使用模型统一价；1536×1024
                 仅作为内部价格基准，用户仍可选择四档分辨率。
               </div>
             )}

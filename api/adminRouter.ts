@@ -12,7 +12,7 @@ import {
 import { createRouter, adminQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { randomBytes } from "crypto";
-import { isImage25Model } from "./generationSize";
+import { isSharedImageModel } from "./generationSize";
 
 const IMAGE_25_BASELINE = { width: 1536, height: 1024 } as const;
 
@@ -20,7 +20,7 @@ function makeCardCode() {
   // 16 位卡密，4-4-4-4 分组，去掉易混淆字符
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const raw = randomBytes(16);
-  const chars = Array.from(raw, (b) => alphabet[b % alphabet.length]).join("");
+  const chars = Array.from(raw, b => alphabet[b % alphabet.length]).join("");
   return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}-${chars.slice(12)}`;
 }
 
@@ -107,18 +107,20 @@ export const adminRouter = createRouter({
           apiKey: z.string().max(512).optional(),
           model: z.string().trim().min(1).max(255),
           priority: z.number().int().default(0),
-        }),
+        })
       )
       .mutation(async ({ input }) => {
         const baseUrl = normalizeUpstreamBaseUrl(input.provider, input.baseUrl);
-        await getDb().insert(upstreams).values({
-          name: input.name,
-          provider: input.provider,
-          baseUrl,
-          apiKey: input.apiKey?.trim() || null,
-          model: input.model,
-          priority: input.priority,
-        });
+        await getDb()
+          .insert(upstreams)
+          .values({
+            name: input.name,
+            provider: input.provider,
+            baseUrl,
+            apiKey: input.apiKey?.trim() || null,
+            model: input.model,
+            priority: input.priority,
+          });
         return { ok: true };
       }),
     update: adminQuery
@@ -132,7 +134,7 @@ export const adminRouter = createRouter({
           model: z.string().trim().min(1).max(255),
           priority: z.number().int(),
           enabled: z.boolean(),
-        }),
+        })
       )
       .mutation(async ({ input }) => {
         const baseUrl = normalizeUpstreamBaseUrl(input.provider, input.baseUrl);
@@ -153,13 +155,18 @@ export const adminRouter = createRouter({
     toggle: adminQuery
       .input(z.object({ id: z.number(), enabled: z.boolean() }))
       .mutation(async ({ input }) => {
-        await getDb().update(upstreams).set({ enabled: input.enabled }).where(eq(upstreams.id, input.id));
+        await getDb()
+          .update(upstreams)
+          .set({ enabled: input.enabled })
+          .where(eq(upstreams.id, input.id));
         return { ok: true };
       }),
-    remove: adminQuery.input(z.object({ id: z.number() })).mutation(async ({ input }) => {
-      await getDb().delete(upstreams).where(eq(upstreams.id, input.id));
-      return { ok: true };
-    }),
+    remove: adminQuery
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        await getDb().delete(upstreams).where(eq(upstreams.id, input.id));
+        return { ok: true };
+      }),
   }),
 
   // ===== 用户管理 =====
@@ -169,12 +176,15 @@ export const adminRouter = createRouter({
         z.object({
           keyword: z.string().optional(),
           limit: z.number().min(1).max(200).default(50),
-        }),
+        })
       )
       .query(async ({ input }) => {
         const db = getDb();
         const cond = input.keyword
-          ? or(like(users.name, `%${input.keyword}%`), like(users.email, `%${input.keyword}%`))
+          ? or(
+              like(users.name, `%${input.keyword}%`),
+              like(users.email, `%${input.keyword}%`)
+            )
           : undefined;
         return db
           .select({
@@ -204,7 +214,7 @@ export const adminRouter = createRouter({
           quota: z.number().int().min(0).max(2_000_000_000).optional(),
           status: z.enum(["active", "banned"]).optional(),
           role: z.enum(["user", "admin"]).optional(),
-        }),
+        })
       )
       .mutation(async ({ ctx, input }) => {
         const db = getDb();
@@ -281,20 +291,20 @@ export const adminRouter = createRouter({
       .mutation(async ({ input }) => {
         const db = getDb();
         if (
-          isImage25Model(input.model) &&
+          isSharedImageModel(input.model) &&
           (input.width !== IMAGE_25_BASELINE.width ||
             input.height !== IMAGE_25_BASELINE.height)
         ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Image 2.5 使用模型统一价格，不能新增独立尺寸价格项",
+            message: "Image 2.5/2.6 使用模型统一价格，不能新增独立尺寸价格项",
           });
         }
         const [duplicate] = await db
           .select({ id: modelPricing.id })
           .from(modelPricing)
           .where(
-            isImage25Model(input.model)
+            isSharedImageModel(input.model)
               ? eq(modelPricing.model, input.model)
               : and(
                   eq(modelPricing.model, input.model),
@@ -306,8 +316,8 @@ export const adminRouter = createRouter({
         if (duplicate) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: isImage25Model(input.model)
-              ? "该 Image 2.5 模型已存在统一价格项"
+            message: isSharedImageModel(input.model)
+              ? "该 Image 2.5/2.6 模型已存在统一价格项"
               : "该模型与尺寸已存在",
           });
         }
@@ -392,20 +402,20 @@ export const adminRouter = createRouter({
           throw new TRPCError({ code: "NOT_FOUND", message: "价格配置不存在" });
         }
         if (
-          isImage25Model(current.model) &&
+          isSharedImageModel(current.model) &&
           (input.width !== IMAGE_25_BASELINE.width ||
             input.height !== IMAGE_25_BASELINE.height)
         ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Image 2.5 使用模型统一价格，内部基准尺寸不能修改",
+            message: "Image 2.5/2.6 使用模型统一价格，内部基准尺寸不能修改",
           });
         }
         const [duplicate] = await db
           .select({ id: modelPricing.id })
           .from(modelPricing)
           .where(
-            isImage25Model(current.model)
+            isSharedImageModel(current.model)
               ? and(
                   eq(modelPricing.model, current.model),
                   ne(modelPricing.id, input.id)
@@ -421,8 +431,8 @@ export const adminRouter = createRouter({
         if (duplicate) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: isImage25Model(current.model)
-              ? "该 Image 2.5 模型存在重复价格项，请先清理重复配置"
+            message: isSharedImageModel(current.model)
+              ? "该 Image 2.5/2.6 模型存在重复价格项，请先清理重复配置"
               : "该模型与尺寸已存在",
           });
         }
@@ -451,13 +461,18 @@ export const adminRouter = createRouter({
     list: adminQuery
       .input(
         z.object({
-          status: z.enum(["all", "unused", "redeemed", "disabled"]).default("all"),
+          status: z
+            .enum(["all", "unused", "redeemed", "disabled"])
+            .default("all"),
           limit: z.number().min(1).max(500).default(100),
-        }),
+        })
       )
       .query(async ({ input }) => {
         const db = getDb();
-        const cond = input.status === "all" ? undefined : eq(cardKeys.status, input.status);
+        const cond =
+          input.status === "all"
+            ? undefined
+            : eq(cardKeys.status, input.status);
         return db
           .select({
             id: cardKeys.id,
@@ -482,7 +497,7 @@ export const adminRouter = createRouter({
           count: z.number().int().min(1).max(200),
           credits: z.number().int().min(1).max(1_000_000_000),
           remark: z.string().max(255).optional(),
-        }),
+        })
       )
       .mutation(async ({ input }) => {
         const db = getDb();
@@ -501,14 +516,26 @@ export const adminRouter = createRouter({
         return { batchNo, codes };
       }),
     setStatus: adminQuery
-      .input(z.object({ id: z.number(), status: z.enum(["unused", "disabled"]) }))
+      .input(
+        z.object({ id: z.number(), status: z.enum(["unused", "disabled"]) })
+      )
       .mutation(async ({ input }) => {
         const db = getDb();
-        const [card] = await db.select().from(cardKeys).where(eq(cardKeys.id, input.id));
-        if (!card) throw new TRPCError({ code: "NOT_FOUND", message: "卡密不存在" });
+        const [card] = await db
+          .select()
+          .from(cardKeys)
+          .where(eq(cardKeys.id, input.id));
+        if (!card)
+          throw new TRPCError({ code: "NOT_FOUND", message: "卡密不存在" });
         if (card.status === "redeemed")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "已兑换的卡密不可修改" });
-        await db.update(cardKeys).set({ status: input.status }).where(eq(cardKeys.id, input.id));
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "已兑换的卡密不可修改",
+          });
+        await db
+          .update(cardKeys)
+          .set({ status: input.status })
+          .where(eq(cardKeys.id, input.id));
         return { ok: true };
       }),
   }),

@@ -1,13 +1,15 @@
-export const DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst";
+export const DEFAULT_IMAGE_MODEL = "gpt-image-2.6-sunburst";
 
-export const IMAGE25_MODELS = [
+export const SHARED_IMAGE_MODELS = [
   "gpt-image-2.5-flare",
   "gpt-image-2.5-sunburst",
+  "gpt-image-2.6-flare",
+  "gpt-image-2.6-sunburst",
 ] as const;
 
 const IMAGE2_SIZE_SOURCE_MODEL = "gpt-image-2";
-const IMAGE25_BASELINE_WIDTH = 1536;
-const IMAGE25_BASELINE_HEIGHT = 1024;
+const SHARED_IMAGE_BASELINE_WIDTH = 1536;
+const SHARED_IMAGE_BASELINE_HEIGHT = 1024;
 
 export type PricingOption = {
   id: number;
@@ -24,10 +26,10 @@ export type ModelOption = {
   label: string;
 };
 
-export function isImage25Model(
+export function isSharedImageModel(
   model: string
-): model is (typeof IMAGE25_MODELS)[number] {
-  return (IMAGE25_MODELS as readonly string[]).includes(model);
+): model is (typeof SHARED_IMAGE_MODELS)[number] {
+  return (SHARED_IMAGE_MODELS as readonly string[]).includes(model);
 }
 
 function isEnabled(row: PricingOption) {
@@ -87,7 +89,9 @@ export function getResolutionOptions(
   rows: readonly PricingOption[],
   model: string
 ): PricingOption[] {
-  const sourceModel = isImage25Model(model) ? IMAGE2_SIZE_SOURCE_MODEL : model;
+  const sourceModel = isSharedImageModel(model)
+    ? IMAGE2_SIZE_SOURCE_MODEL
+    : model;
 
   const ordered = rows
     .filter(row => isEnabled(row) && row.model === sourceModel)
@@ -115,7 +119,7 @@ export function resolvePricingForModelAndSize(
     row => row.width === width && row.height === height
   );
   if (exact) return exact;
-  if (!isImage25Model(model)) return undefined;
+  if (!isSharedImageModel(model)) return undefined;
 
   const sizeIsAvailable = getResolutionOptions(rows, model).some(
     row => row.width === width && row.height === height
@@ -125,8 +129,8 @@ export function resolvePricingForModelAndSize(
   return (
     modelRows.find(
       row =>
-        row.width === IMAGE25_BASELINE_WIDTH &&
-        row.height === IMAGE25_BASELINE_HEIGHT
+        row.width === SHARED_IMAGE_BASELINE_WIDTH &&
+        row.height === SHARED_IMAGE_BASELINE_HEIGHT
     ) ?? modelRows[0]
   );
 }

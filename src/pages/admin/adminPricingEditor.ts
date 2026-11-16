@@ -1,21 +1,27 @@
-export const ADMIN_DEFAULT_MODEL = "gpt-image-2.5-sunburst";
+export const ADMIN_DEFAULT_MODEL = "gpt-image-2.6-sunburst";
 export const IMAGE_2_MODEL = "gpt-image-2";
 
-const IMAGE_2_5_MODELS = new Set([
+const SHARED_IMAGE_MODELS = new Set([
   "gpt-image-2.5-flare",
   "gpt-image-2.5-sunburst",
+  "gpt-image-2.6-flare",
+  "gpt-image-2.6-sunburst",
 ]);
 
 const KNOWN_MODEL_LABELS: Record<string, string> = {
   "gpt-image-2": "GPT Image 2",
   "gpt-image-2.5-flare": "GPT Image 2.5 Flare",
   "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst",
+  "gpt-image-2.6-flare": "GPT Image 2.6 Flare",
+  "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst",
 };
 
 const KNOWN_MODEL_ORDER = new Map([
-  ["gpt-image-2.5-sunburst", 0],
-  ["gpt-image-2.5-flare", 1],
-  ["gpt-image-2", 2],
+  ["gpt-image-2.6-sunburst", 0],
+  ["gpt-image-2.6-flare", 1],
+  ["gpt-image-2.5-sunburst", 2],
+  ["gpt-image-2.5-flare", 3],
+  ["gpt-image-2", 4],
 ]);
 
 const KNOWN_RESOLUTIONS = new Map([
@@ -57,8 +63,8 @@ export type AdminPricingTarget =
   | { status: "missing"; message: string }
   | { status: "conflict"; message: string; rowIds: number[] };
 
-export function isAdminImage25Model(model: string) {
-  return IMAGE_2_5_MODELS.has(model);
+export function isAdminSharedImageModel(model: string) {
+  return SHARED_IMAGE_MODELS.has(model);
 }
 
 export function getAdminModelLabel(model: string, fallbackLabel?: string) {
@@ -111,7 +117,7 @@ export function buildAdminResolutionOptions(
   rows: readonly AdminPricingRow[],
   model: string
 ): AdminResolutionOption[] {
-  const sourceModel = isAdminImage25Model(model) ? IMAGE_2_MODEL : model;
+  const sourceModel = isAdminSharedImageModel(model) ? IMAGE_2_MODEL : model;
   const grouped = new Map<string, AdminResolutionOption>();
 
   for (const row of rows) {
@@ -158,7 +164,7 @@ export function resolveAdminPricingTarget(
   height: number
 ): AdminPricingTarget {
   const candidates = rows.filter(row =>
-    isAdminImage25Model(model)
+    isAdminSharedImageModel(model)
       ? row.model === model
       : row.model === model && row.width === width && row.height === height
   );
@@ -166,7 +172,7 @@ export function resolveAdminPricingTarget(
   if (candidates.length === 0) {
     return {
       status: "missing",
-      message: isAdminImage25Model(model)
+      message: isAdminSharedImageModel(model)
         ? "该模型尚未创建统一价格项"
         : "该模型与分辨率尚未创建价格项",
     };
@@ -174,8 +180,8 @@ export function resolveAdminPricingTarget(
   if (candidates.length > 1) {
     return {
       status: "conflict",
-      message: isAdminImage25Model(model)
-        ? "该 Image 2.5 模型存在多条价格项，请在高级管理中处理"
+      message: isAdminSharedImageModel(model)
+        ? "该 Image 2.5/2.6 模型存在多条价格项，请在高级管理中处理"
         : "该模型与分辨率存在重复价格项，请在高级管理中处理",
       rowIds: candidates.map(row => row.id),
     };

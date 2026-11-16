@@ -36,9 +36,11 @@ const upstream: Upstream = {
   updatedAt: new Date(),
 };
 
-const image25Models = [
+const sharedImageModels = [
   "gpt-image-2.5-flare",
   "gpt-image-2.5-sunburst",
+  "gpt-image-2.6-flare",
+  "gpt-image-2.6-sunburst",
 ] as const;
 
 const png = Buffer.concat([
@@ -269,7 +271,7 @@ describe("upstream request format", () => {
     expect(Buffer.from(await image.arrayBuffer())).toEqual(png);
   });
 
-  it.each(image25Models)(
+  it.each(sharedImageModels)(
     "passes %s unchanged to JSON generations requests",
     async model => {
       const fetchMock = vi
@@ -295,7 +297,7 @@ describe("upstream request format", () => {
     }
   );
 
-  it.each(image25Models)(
+  it.each(sharedImageModels)(
     "passes %s unchanged to multipart edits requests",
     async model => {
       const fetchMock = vi

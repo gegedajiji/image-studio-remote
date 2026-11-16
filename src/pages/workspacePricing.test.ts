@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_IMAGE_MODEL,
-  IMAGE25_MODELS,
+  SHARED_IMAGE_MODELS,
   buildModelOptions,
   getResolutionOptions,
-  isImage25Model,
+  isSharedImageModel,
   resolvePricingForModelAndSize,
   type PricingOption,
 } from "./workspacePricing";
@@ -47,6 +47,24 @@ const pricingRows: PricingOption[] = [
     enabled: true,
   },
   {
+    id: 7,
+    model: "gpt-image-2.6-flare",
+    label: "GPT Image 2.6 Flare · 自适应画幅（请求基准） 1536×1024",
+    width: 1536,
+    height: 1024,
+    price: 15,
+    enabled: true,
+  },
+  {
+    id: 8,
+    model: "gpt-image-2.6-sunburst",
+    label: "GPT Image 2.6 Sunburst · 自适应画幅（请求基准） 1536×1024",
+    width: 1536,
+    height: 1024,
+    price: 20,
+    enabled: true,
+  },
+  {
     id: 3,
     model: "gpt-image-2",
     label: "GPT Image 2 · 竖版 1024×1536",
@@ -67,32 +85,40 @@ const pricingRows: PricingOption[] = [
 ];
 
 describe("workspace pricing helpers", () => {
-  it("uses the exact Sunburst model as the default and recognizes only Image 2.5 IDs", () => {
-    expect(DEFAULT_IMAGE_MODEL).toBe("gpt-image-2.5-sunburst");
-    expect(IMAGE25_MODELS).toEqual([
+  it("uses the exact Image 2.6 Sunburst model as default and recognizes shared model IDs", () => {
+    expect(DEFAULT_IMAGE_MODEL).toBe("gpt-image-2.6-sunburst");
+    expect(SHARED_IMAGE_MODELS).toEqual([
       "gpt-image-2.5-flare",
       "gpt-image-2.5-sunburst",
+      "gpt-image-2.6-flare",
+      "gpt-image-2.6-sunburst",
     ]);
-    expect(isImage25Model("gpt-image-2.5-flare")).toBe(true);
-    expect(isImage25Model("gpt-image-2.5-sunburst")).toBe(true);
-    expect(isImage25Model("gpt-image-2")).toBe(false);
-    expect(isImage25Model("gpt-image-2.5-sunburst-preview")).toBe(false);
+    expect(isSharedImageModel("gpt-image-2.5-flare")).toBe(true);
+    expect(isSharedImageModel("gpt-image-2.6-sunburst")).toBe(true);
+    expect(isSharedImageModel("gpt-image-2")).toBe(false);
+    expect(isSharedImageModel("gpt-image-2.6-sunburst-preview")).toBe(false);
   });
 
   it("deduplicates models and places Sunburst first", () => {
     const options = buildModelOptions(pricingRows);
 
     expect(options[0]).toEqual({
-      model: "gpt-image-2.5-sunburst",
-      label: "GPT Image 2.5 Sunburst",
+      model: "gpt-image-2.6-sunburst",
+      label: "GPT Image 2.6 Sunburst",
     });
-    expect(options.map(option => option.model)).toHaveLength(3);
+    expect(options.map(option => option.model)).toHaveLength(5);
     expect(new Set(options.map(option => option.model))).toEqual(
-      new Set(["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"])
+      new Set([
+        "gpt-image-2",
+        "gpt-image-2.5-flare",
+        "gpt-image-2.5-sunburst",
+        "gpt-image-2.6-flare",
+        "gpt-image-2.6-sunburst",
+      ])
     );
   });
 
-  it.each(["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"])(
+  it.each(SHARED_IMAGE_MODELS)(
     "reuses Image 2 resolutions for %s in stable display order",
     model => {
       expect(
@@ -162,6 +188,8 @@ describe("workspace pricing helpers", () => {
   it.each([
     ["gpt-image-2.5-flare", 15, 5],
     ["gpt-image-2.5-sunburst", 20, 6],
+    ["gpt-image-2.6-flare", 15, 7],
+    ["gpt-image-2.6-sunburst", 20, 8],
   ] as const)(
     "keeps %s at its fixed base price for every shared resolution",
     (model, price, pricingId) => {

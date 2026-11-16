@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  IMAGE_2_5_MODELS,
-  isImage25Model,
+  SHARED_IMAGE_MODELS,
+  isSharedImageModel,
   resolveGenerationDimensions,
 } from "./generationSize";
 
@@ -22,22 +22,24 @@ const sunburstPricing = {
   enabled: true,
 } as const;
 
-describe("Image 2.5 model matching", () => {
-  it.each(IMAGE_2_5_MODELS)("accepts the exact %s model", model => {
-    expect(isImage25Model(model)).toBe(true);
+describe("shared image model matching", () => {
+  it.each(SHARED_IMAGE_MODELS)("accepts the exact %s model", model => {
+    expect(isSharedImageModel(model)).toBe(true);
   });
 
   it.each([
     "gpt-image-2.5",
+    "gpt-image-2.6",
     "gpt-image-2",
     "gpt-image-2.5-flare-preview",
+    "gpt-image-2.6-sunburst-extra",
     "gpt-image-2.5-sunburst-extra",
     " gpt-image-2.5-sunburst",
     "GPT-IMAGE-2.5-SUNBURST",
     null,
     undefined,
   ])("rejects a non-exact model identifier: %s", model => {
-    expect(isImage25Model(model)).toBe(false);
+    expect(isSharedImageModel(model)).toBe(false);
   });
 });
 
@@ -65,7 +67,7 @@ describe("generation dimension resolution", () => {
     ).toEqual({ width: 1024, height: 1024 });
   });
 
-  it.each(IMAGE_2_5_MODELS)(
+  it.each(SHARED_IMAGE_MODELS)(
     "allows all enabled Image 2 sizes for %s",
     model => {
       for (const size of enabledImage2Sizes) {

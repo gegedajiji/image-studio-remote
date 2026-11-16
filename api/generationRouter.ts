@@ -28,7 +28,7 @@ import {
 } from "./generationError";
 import {
   IMAGE_2_SIZE_SOURCE_MODEL,
-  isImage25Model,
+  isSharedImageModel,
   resolveGenerationDimensions,
 } from "./generationSize";
 
@@ -238,7 +238,7 @@ export const generationRouter = createRouter({
       }
 
       const generationType = referenceImage ? "图生图" : "生图";
-      const generationLabel = isImage25Model(pricing.model)
+      const generationLabel = isSharedImageModel(pricing.model)
         ? `${pricing.label.split(" · ", 1)[0]} · ${requestedDimensions.width}×${requestedDimensions.height}`
         : pricing.label;
       // 锁定用户、扣费和创建 pending 记录在同一事务中完成，避免并发超扣或插入失败漏扣。

@@ -23,7 +23,7 @@ import {
 } from "./generationError";
 import {
   IMAGE_2_SIZE_SOURCE_MODEL,
-  isImage25Model,
+  isSharedImageModel,
   resolveGenerationDimensions,
 } from "./generationSize";
 
@@ -145,7 +145,9 @@ openApi.post("/images/generations", async c => {
       ? (requestedModelPricings.find(
           p => `${p.width}x${p.height}` === body.size
         ) ??
-        (isImage25Model(body.model) ? requestedModelPricings[0] : undefined))
+        (isSharedImageModel(body.model)
+          ? requestedModelPricings[0]
+          : undefined))
       : body.model
         ? requestedModelPricings[0]
         : body.size
@@ -178,7 +180,7 @@ openApi.post("/images/generations", async c => {
       400
     );
   }
-  const generationLabel = isImage25Model(pricing.model)
+  const generationLabel = isSharedImageModel(pricing.model)
     ? `${pricing.label.split(" · ", 1)[0]} · ${requestedDimensions.width}×${requestedDimensions.height}`
     : pricing.label;
 
